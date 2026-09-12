@@ -9,15 +9,20 @@ import net.runelite.client.config.ConfigSection;
 public interface LiveRightNowConfig extends Config
 {
     String GROUP = "liverightnow";
-    String TWITCH_DEFAULT_CLIENT_ID = "ka3clhecbpbyijmalu7th9rkfuol9f";
+    String TWITCH_DEFAULT_CLIENT_ID = "bsj8pbpnptei2b3q7zwp70gn14lptn";
+    String KICK_DEFAULT_CLIENT_ID = "01M29F2N6HTHHC9E9YPASHHP0T";
 
     String TWITCH_STREAMERS_KEY = "twitchStreamers";
     String TWITCH_CLIENT_ID_KEY = "twitchClientId";
     String TWITCH_OAUTH_TOKEN_KEY = "twitchOAuthToken";
     String TWITCH_CONNECTED_USER_KEY = "twitchConnectedUser";
-    String NOTIFIED_SESSIONS_KEY = "notifiedSessions";
 
     String KICK_STREAMERS_KEY = "kickStreamers";
+    String KICK_CLIENT_ID_KEY = "kickClientId";
+    String KICK_OAUTH_TOKEN_KEY = "kickOAuthToken";
+    String KICK_CONNECTED_USER_KEY = "kickConnectedUser";
+
+    String NOTIFIED_SESSIONS_KEY = "notifiedSessions";
 
     @ConfigSection(
         name = "Twitch",
@@ -28,8 +33,8 @@ public interface LiveRightNowConfig extends Config
 
     @ConfigItem(
         keyName = TWITCH_CONNECTED_USER_KEY,
-        name = "",
-        description = "",
+        name = "Twitch Connected User",
+        description = "Connected Twitch username",
         hidden = true
     )
     default String twitchConnectedUser()
@@ -51,8 +56,8 @@ public interface LiveRightNowConfig extends Config
 
     @ConfigItem(
         keyName = TWITCH_CLIENT_ID_KEY,
-        name = "",
-        description = "",
+        name = "Twitch Client ID",
+        description = "Twitch OAuth Client ID",
         hidden = true
     )
     default String twitchClientId()
@@ -62,8 +67,8 @@ public interface LiveRightNowConfig extends Config
 
     @ConfigItem(
         keyName = TWITCH_OAUTH_TOKEN_KEY,
-        name = "",
-        description = "",
+        name = "Twitch OAuth Token",
+        description = "Twitch OAuth Access Token",
         hidden = true,
         secret = true
     )
@@ -74,8 +79,8 @@ public interface LiveRightNowConfig extends Config
 
     @ConfigItem(
         keyName = NOTIFIED_SESSIONS_KEY,
-        name = "",
-        description = "",
+        name = "Notified Sessions",
+        description = "Persisted live sessions",
         hidden = true,
         secret = true
     )
@@ -92,13 +97,47 @@ public interface LiveRightNowConfig extends Config
     String KICK_SECTION = "kickSection";
 
     @ConfigItem(
+        keyName = KICK_CONNECTED_USER_KEY,
+        name = "Kick Connected User",
+        description = "Connected Kick username",
+        hidden = true
+    )
+    default String kickConnectedUser()
+    {
+        return "";
+    }
+
+    @ConfigItem(
         keyName = KICK_STREAMERS_KEY,
         name = "Tracked Streamers",
-        description = "Comma-separated list of Kick usernames to track",
+        description = "Comma-separated list of Kick usernames to track (e.g. odablock, adinross)",
         position = 12,
         section = KICK_SECTION
     )
     default String kickStreamers()
+    {
+        return "";
+    }
+
+    @ConfigItem(
+        keyName = KICK_CLIENT_ID_KEY,
+        name = "Kick Client ID",
+        description = "Kick OAuth Client ID",
+        hidden = true
+    )
+    default String kickClientId()
+    {
+        return KICK_DEFAULT_CLIENT_ID;
+    }
+
+    @ConfigItem(
+        keyName = KICK_OAUTH_TOKEN_KEY,
+        name = "Kick OAuth Token",
+        description = "Kick OAuth Access Token",
+        hidden = true,
+        secret = true
+    )
+    default String kickOAuthToken()
     {
         return "";
     }

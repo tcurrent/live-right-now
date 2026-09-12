@@ -23,6 +23,8 @@ import com.google.inject.Provides;
 import com.tcurrent.liverightnow.model.Platform;
 import com.tcurrent.liverightnow.model.StreamInfo;
 import com.tcurrent.liverightnow.notification.StreamNotificationManager;
+import com.tcurrent.liverightnow.oauth.KickOAuthManager;
+import com.tcurrent.liverightnow.oauth.OAuthLoopbackServer;
 import com.tcurrent.liverightnow.oauth.TwitchOAuthManager;
 import com.tcurrent.liverightnow.service.KickService;
 import com.tcurrent.liverightnow.service.TwitchService;
@@ -64,6 +66,12 @@ public class LiveRightNowPlugin extends Plugin
 
     @Inject
     private TwitchOAuthManager twitchOAuthManager;
+
+    @Inject
+    private KickOAuthManager kickOAuthManager;
+
+    @Inject
+    private OAuthLoopbackServer loopbackServer;
 
     @Inject
     private StreamNotificationManager notificationManager;
@@ -126,7 +134,8 @@ public class LiveRightNowPlugin extends Plugin
     {
         String configuredClientId = config.twitchClientId();
         if (configuredClientId == null || configuredClientId.isBlank() ||
-            "kimne78kx3ncx6brgo4mv6wki5h1ko".equals(configuredClientId))
+            "kimne78kx3ncx6brgo4mv6wki5h1ko".equals(configuredClientId) ||
+            "ka3clhecbpbyijmalu7th9rkfuol9f".equals(configuredClientId))
         {
             configManager.setConfiguration(
                 LiveRightNowConfig.GROUP,
@@ -140,6 +149,7 @@ public class LiveRightNowPlugin extends Plugin
     protected void shutDown()
     {
         stopPolling();
+        loopbackServer.stop();
         clientToolbar.removeNavigation(navButton);
         liveStateCache.clear();
         initialized = false;
@@ -169,7 +179,9 @@ public class LiveRightNowPlugin extends Plugin
         }
 
         if (LiveRightNowConfig.TWITCH_OAUTH_TOKEN_KEY.equals(event.getKey()) ||
-            LiveRightNowConfig.TWITCH_CONNECTED_USER_KEY.equals(event.getKey()))
+            LiveRightNowConfig.TWITCH_CONNECTED_USER_KEY.equals(event.getKey()) ||
+            LiveRightNowConfig.KICK_OAUTH_TOKEN_KEY.equals(event.getKey()) ||
+            LiveRightNowConfig.KICK_CONNECTED_USER_KEY.equals(event.getKey()))
         {
             panel.refreshAccountsUi();
             executorService.execute(this::checkStreams);
@@ -219,9 +231,9 @@ public class LiveRightNowPlugin extends Plugin
             }
 
             boolean twitchConnected = twitchOAuthManager.isConnected();
-            List<String> kickChannels = parseChannelList(config.kickStreamers());
+            boolean kickConnected = kickOAuthManager.isConnected();
 
-            if (!twitchConnected && kickChannels.isEmpty())
+            if (!twitchConnected && !kickConnected)
             {
                 panel.updateStreams(Collections.emptyList());
                 return;
@@ -246,15 +258,19 @@ public class LiveRightNowPlugin extends Plugin
                 }
             }
 
-            if (!kickChannels.isEmpty())
+            if (kickConnected)
             {
-                List<StreamInfo> kickStreams = kickService.fetchStreams(kickChannels);
-                processStreamUpdates(kickStreams);
-                for (StreamInfo s : kickStreams)
+                List<String> kickChannels = parseChannelList(config.kickStreamers());
+                if (!kickChannels.isEmpty())
                 {
-                    if (s.isLive())
+                    List<StreamInfo> kickStreams = kickService.fetchStreams(kickChannels);
+                    processStreamUpdates(kickStreams);
+                    for (StreamInfo s : kickStreams)
                     {
-                        activeStreams.add(s);
+                        if (s.isLive())
+                        {
+                            activeStreams.add(s);
+                        }
                     }
                 }
             }
@@ -421,15 +437,31 @@ public class LiveRightNowPlugin extends Plugin
     {
         boolean hasTwitchStreamers = !parseChannelList(config.twitchStreamers()).isEmpty();
         boolean twitchConnected = twitchOAuthManager.isConnected();
+        boolean hasKickStreamers = !parseChannelList(config.kickStreamers()).isEmpty();
+        boolean kickConnected = kickOAuthManager.isConnected();
 
         boolean needsTwitch = hasTwitchStreamers && !twitchConnected;
+        boolean needsKick = hasKickStreamers && !kickConnected;
 
-        if (needsTwitch)
+        if (needsTwitch || needsKick)
         {
             if (!loginReminderSent)
             {
                 loginReminderSent = true;
-                notificationManager.notifyConnectReminder("Connect your Twitch account in the side panel to get started with stream notifications.");
+                String msg;
+                if (needsTwitch && needsKick)
+                {
+                    msg = "Connect your Twitch and Kick accounts in the side panel to get started with stream notifications.";
+                }
+                else if (needsTwitch)
+                {
+                    msg = "Connect your Twitch account in the side panel to get started with stream notifications.";
+                }
+                else
+                {
+                    msg = "Connect your Kick account in the side panel to get started with stream notifications.";
+                }
+                notificationManager.notifyConnectReminder(msg);
             }
         }
     }

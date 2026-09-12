@@ -29,6 +29,7 @@ import javax.swing.border.EmptyBorder;
 import com.tcurrent.liverightnow.LiveRightNowConfig;
 import com.tcurrent.liverightnow.model.Platform;
 import com.tcurrent.liverightnow.model.StreamInfo;
+import com.tcurrent.liverightnow.oauth.KickOAuthManager;
 import com.tcurrent.liverightnow.oauth.TwitchOAuthManager;
 
 import net.runelite.client.ui.ColorScheme;
@@ -45,6 +46,7 @@ public class LiveRightNowPanel extends PluginPanel
     private static final Color DISCONNECT_RED = new Color(220, 53, 69);
 
     private final TwitchOAuthManager twitchOAuthManager;
+    private final KickOAuthManager kickOAuthManager;
     private final LiveRightNowConfig config;
 
     private final JPanel contentPanel = new JPanel();
@@ -52,10 +54,15 @@ public class LiveRightNowPanel extends PluginPanel
     private final JPanel streamsPanel = new JPanel();
 
     @Inject
-    public LiveRightNowPanel(TwitchOAuthManager twitchOAuthManager, LiveRightNowConfig config)
+    public LiveRightNowPanel(
+        TwitchOAuthManager twitchOAuthManager,
+        KickOAuthManager kickOAuthManager,
+        LiveRightNowConfig config
+    )
     {
         super(false);
         this.twitchOAuthManager = twitchOAuthManager;
+        this.kickOAuthManager = kickOAuthManager;
         this.config = config;
 
         setLayout(new BorderLayout());
@@ -156,7 +163,17 @@ public class LiveRightNowPanel extends PluginPanel
             accountsPanel.add(Box.createRigidArea(new Dimension(0, 8)));
 
             // Kick Section
-            accountsPanel.add(createPublicMonitoringCard("Kick"));
+            accountsPanel.add(createAccountCard(
+                "Kick",
+                KICK_GREEN,
+                kickOAuthManager.isConnected(),
+                kickOAuthManager.getConnectedUser(),
+                () -> kickOAuthManager.startConnectFlow().thenAccept(ok -> refreshAccountsUi()),
+                () -> {
+                    kickOAuthManager.disconnect();
+                    refreshAccountsUi();
+                }
+            ));
 
             accountsPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, accountsPanel.getPreferredSize().height));
             accountsPanel.revalidate();
@@ -169,8 +186,7 @@ public class LiveRightNowPanel extends PluginPanel
         SwingUtilities.invokeLater(() -> {
             streamsPanel.removeAll();
 
-            boolean anyConnected = twitchOAuthManager.isConnected() ||
-                (config.kickStreamers() != null && !config.kickStreamers().trim().isEmpty());
+            boolean anyConnected = twitchOAuthManager.isConnected() || kickOAuthManager.isConnected();
             if (!anyConnected)
             {
                 JPanel warningRow = new JPanel(new BorderLayout());
@@ -282,30 +298,6 @@ public class LiveRightNowPanel extends PluginPanel
         }
 
         card.add(btnPanel, BorderLayout.SOUTH);
-
-        // BorderLayout reports an unbounded maximum size, which makes BoxLayout stretch the card; clamp it.
-        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, card.getPreferredSize().height));
-        return card;
-    }
-
-    private JPanel createPublicMonitoringCard(String platformName)
-    {
-        JPanel card = new JPanel(new BorderLayout(5, 5));
-        card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-        card.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createMatteBorder(0, 3, 0, 0, KICK_GREEN),
-            new EmptyBorder(8, 10, 8, 10)
-        ));
-
-        JLabel platformLabel = new JLabel(platformName);
-        platformLabel.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
-        platformLabel.setForeground(Color.WHITE);
-        card.add(platformLabel, BorderLayout.NORTH);
-
-        JLabel statusLabel = new JLabel("Public monitoring - no account required");
-        statusLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
-        statusLabel.setForeground(STATUS_ONLINE_COLOR);
-        card.add(statusLabel, BorderLayout.CENTER);
 
         card.setMaximumSize(new Dimension(Integer.MAX_VALUE, card.getPreferredSize().height));
         return card;
