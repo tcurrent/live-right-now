@@ -131,7 +131,7 @@ public interface LiveRightNowConfig extends Config
     )
     default boolean notificationEnabled()
     {
-        return false;
+        return true;
     }
 
 }
