@@ -70,7 +70,7 @@ public class TwitchOAuthManager
 
         try
         {
-            loopbackServer.start((provider, token) -> {
+            String nonce = loopbackServer.start((provider, token) -> {
                 if ("twitch".equalsIgnoreCase(provider))
                 {
                     saveToken(token);
@@ -81,7 +81,8 @@ public class TwitchOAuthManager
                 }
             });
 
-            String proxyUrl = "https://tcurrent.github.io/live-right-now-oauth-proxy/?provider=twitch&port=" + OAuthLoopbackServer.PORT;
+            String proxyUrl = "https://tcurrent.github.io/live-right-now-oauth-proxy/?provider=twitch&port="
+                + OAuthLoopbackServer.PORT + "&nonce=" + nonce;
             LinkBrowser.browse(proxyUrl);
         }
         catch (IOException e)

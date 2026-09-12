@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
@@ -26,10 +27,12 @@ public class OAuthLoopbackServer
     private static final Logger log = LoggerFactory.getLogger(OAuthLoopbackServer.class);
     public static final int PORT = 4646;
     private static final String CALLBACK_PATH = "/callback";
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final ScheduledExecutorService executorService;
     private HttpServer server;
     private BiConsumer<String, String> tokenCallback;
+    private String expectedNonce;
 
     @Inject
     public OAuthLoopbackServer(ScheduledExecutorService executorService)
@@ -37,19 +40,25 @@ public class OAuthLoopbackServer
         this.executorService = executorService;
     }
 
-    public synchronized void start(BiConsumer<String, String> callback) throws IOException
+    /**
+     * Generates a fresh single-use nonce and (re)starts the loopback listener, tearing down
+     * any previous instance so a stale flow can never be mistaken for the new one.
+     */
+    public synchronized String start(BiConsumer<String, String> callback) throws IOException
     {
+        stop();
+
         this.tokenCallback = callback;
-        if (server != null)
-        {
-            return;
-        }
+        byte[] nonceBytes = new byte[24];
+        SECURE_RANDOM.nextBytes(nonceBytes);
+        this.expectedNonce = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(nonceBytes);
 
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", PORT), 0);
         server.createContext(CALLBACK_PATH, new CallbackHandler());
         server.setExecutor(executorService);
         server.start();
         log.debug("OAuth loopback server started on port {}", PORT);
+        return expectedNonce;
     }
 
     public synchronized void stop()
@@ -59,6 +68,7 @@ public class OAuthLoopbackServer
             server.stop(0);
             server = null;
             tokenCallback = null;
+            expectedNonce = null;
             log.debug("OAuth loopback server stopped");
         }
     }
@@ -73,37 +83,47 @@ public class OAuthLoopbackServer
 
             String provider = params.get("provider");
             String token = params.get("token");
+            String nonce = params.get("nonce");
             String error = params.get("error");
 
             String responseHtml;
             int statusCode;
+            boolean accepted = false;
 
-            if (token != null && !token.trim().isEmpty() && provider != null)
+            synchronized (OAuthLoopbackServer.this)
             {
-                String platformDisplay = "kick".equalsIgnoreCase(provider) ? "Kick" : "Twitch";
-                responseHtml = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Live Right Now - Connected</title>"
-                    + "<style>body{font-family:Segoe UI,Helvetica,Arial,sans-serif;background:#121212;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}"
-                    + ".card{background:#1e1e1e;padding:30px 40px;border-radius:10px;border:1px solid #333;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.5);max-width:400px;}"
-                    + "h2{color:#00B4D8;margin-top:0;}p{color:#aaa;line-height:1.5;}</style></head>"
-                    + "<body><div class='card'><h2>Live Right Now</h2>"
-                    + "<p><strong>" + platformDisplay + "</strong> connected successfully!<br>You can safely close this window and return to RuneScape.</p></div></body></html>";
-                statusCode = 200;
+                boolean nonceValid = expectedNonce != null && expectedNonce.equals(nonce);
 
-                if (tokenCallback != null)
+                if (!nonceValid)
                 {
-                    tokenCallback.accept(provider.toLowerCase(), token);
+                    responseHtml = errorPage("This authorization link is invalid or has expired. Please click Connect again in RuneLite.");
+                    statusCode = 400;
                 }
-            }
-            else
-            {
-                String errorMsg = error != null ? error : "Authorization failed or token missing.";
-                responseHtml = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Live Right Now - Error</title>"
-                    + "<style>body{font-family:Segoe UI,Helvetica,Arial,sans-serif;background:#121212;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}"
-                    + ".card{background:#1e1e1e;padding:30px 40px;border-radius:10px;border:1px solid #ff4444;text-align:center;max-width:400px;}"
-                    + "h2{color:#ff4444;margin-top:0;}p{color:#aaa;}</style></head>"
-                    + "<body><div class='card'><h2>Authentication Error</h2>"
-                    + "<p>" + errorMsg + "</p></div></body></html>";
-                statusCode = 400;
+                else if (token != null && !token.trim().isEmpty() && provider != null)
+                {
+                    String platformDisplay = "kick".equalsIgnoreCase(provider) ? "Kick" : "Twitch";
+                    responseHtml = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Live Right Now - Connected</title>"
+                        + "<style>body{font-family:Segoe UI,Helvetica,Arial,sans-serif;background:#121212;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}"
+                        + ".card{background:#1e1e1e;padding:30px 40px;border-radius:10px;border:1px solid #333;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.5);max-width:400px;}"
+                        + "h2{color:#00B4D8;margin-top:0;}p{color:#aaa;line-height:1.5;}</style></head>"
+                        + "<body><div class='card'><h2>Live Right Now</h2>"
+                        + "<p><strong>" + platformDisplay + "</strong> connected successfully!<br>You can safely close this window and return to RuneScape.</p></div></body></html>";
+                    statusCode = 200;
+                    accepted = true;
+                }
+                else
+                {
+                    String errorMsg = error != null ? error : "Authorization failed or token missing.";
+                    responseHtml = errorPage(errorMsg);
+                    statusCode = 400;
+                }
+
+                if (accepted)
+                {
+                    // Single-use: invalidate the nonce immediately so a replayed or duplicated
+                    // request cannot be accepted twice.
+                    expectedNonce = null;
+                }
             }
 
             byte[] bytes = responseHtml.getBytes(StandardCharsets.UTF_8);
@@ -114,8 +134,23 @@ public class OAuthLoopbackServer
                 os.write(bytes);
             }
 
-            executorService.schedule(() -> stop(), 2, TimeUnit.SECONDS);
+            if (accepted && tokenCallback != null && provider != null)
+            {
+                tokenCallback.accept(provider.toLowerCase(), token);
+            }
+
+            executorService.schedule(OAuthLoopbackServer.this::stop, 2, TimeUnit.SECONDS);
         }
+    }
+
+    private String errorPage(String message)
+    {
+        return "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Live Right Now - Error</title>"
+            + "<style>body{font-family:Segoe UI,Helvetica,Arial,sans-serif;background:#121212;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}"
+            + ".card{background:#1e1e1e;padding:30px 40px;border-radius:10px;border:1px solid #ff4444;text-align:center;max-width:400px;}"
+            + "h2{color:#ff4444;margin-top:0;}p{color:#aaa;}</style></head>"
+            + "<body><div class='card'><h2>Authentication Error</h2>"
+            + "<p>" + message + "</p></div></body></html>";
     }
 
     private Map<String, String> parseQuery(String query)

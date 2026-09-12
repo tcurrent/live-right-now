@@ -73,7 +73,7 @@ public class KickOAuthManager
 
         try
         {
-            loopbackServer.start((provider, token) -> {
+            String nonce = loopbackServer.start((provider, token) -> {
                 if ("kick".equalsIgnoreCase(provider))
                 {
                     saveToken(token);
@@ -84,7 +84,8 @@ public class KickOAuthManager
                 }
             });
 
-            String proxyUrl = "https://tcurrent.github.io/live-right-now-oauth-proxy/?provider=kick&port=" + OAuthLoopbackServer.PORT;
+            String proxyUrl = "https://tcurrent.github.io/live-right-now-oauth-proxy/?provider=kick&port="
+                + OAuthLoopbackServer.PORT + "&nonce=" + nonce;
             LinkBrowser.browse(proxyUrl);
         }
         catch (IOException e)
