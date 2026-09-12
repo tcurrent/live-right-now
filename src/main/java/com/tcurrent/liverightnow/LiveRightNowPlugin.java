@@ -6,6 +6,7 @@ import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -22,11 +23,9 @@ import com.google.inject.Provides;
 import com.tcurrent.liverightnow.model.Platform;
 import com.tcurrent.liverightnow.model.StreamInfo;
 import com.tcurrent.liverightnow.notification.StreamNotificationManager;
-import com.tcurrent.liverightnow.oauth.KickOAuthManager;
 import com.tcurrent.liverightnow.oauth.TwitchOAuthManager;
 import com.tcurrent.liverightnow.service.KickService;
 import com.tcurrent.liverightnow.service.TwitchService;
-import com.tcurrent.liverightnow.ui.BannerNotificationOverlay;
 import com.tcurrent.liverightnow.ui.LiveRightNowPanel;
 
 import net.runelite.api.Client;
@@ -39,7 +38,7 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
-import net.runelite.client.ui.overlay.OverlayManager;
+import net.runelite.client.util.ImageUtil;
 
 @PluginDescriptor(
     name = "Live Right Now",
@@ -67,9 +66,6 @@ public class LiveRightNowPlugin extends Plugin
     private TwitchOAuthManager twitchOAuthManager;
 
     @Inject
-    private KickOAuthManager kickOAuthManager;
-
-    @Inject
     private StreamNotificationManager notificationManager;
 
     @Inject
@@ -84,12 +80,6 @@ public class LiveRightNowPlugin extends Plugin
     @Inject
     private LiveRightNowPanel panel;
 
-    @Inject
-    private OverlayManager overlayManager;
-
-    @Inject
-    private BannerNotificationOverlay bannerOverlay;
-
     private static final int POLLING_INTERVAL_MINUTES = 2;
 
     private NavigationButton navButton;
@@ -97,8 +87,6 @@ public class LiveRightNowPlugin extends Plugin
     private ScheduledFuture<?> pollingTask;
     private boolean initialized = false;
     private boolean loginReminderSent = false;
-
-    private static final String NOTIFIED_SESSION_PREFIX = "notifiedSession.";
 
     @Provides
     LiveRightNowConfig provideConfig(ConfigManager configManager)
@@ -109,11 +97,10 @@ public class LiveRightNowPlugin extends Plugin
     @Override
     protected void startUp()
     {
+        migrateTwitchClientId();
         liveStateCache.clear();
         initialized = false;
         loginReminderSent = false;
-
-        overlayManager.add(bannerOverlay);
 
         BufferedImage icon = createPluginIcon();
         navButton = NavigationButton.builder()
@@ -129,23 +116,34 @@ public class LiveRightNowPlugin extends Plugin
         if (client.getGameState() == GameState.LOGGED_IN)
         {
             checkAndSendConnectReminder();
+            executorService.execute(this::checkStreams);
         }
 
         startPolling();
-        log.info("Live Right Now plugin started");
+    }
+
+    private void migrateTwitchClientId()
+    {
+        String configuredClientId = config.twitchClientId();
+        if (configuredClientId == null || configuredClientId.isBlank() ||
+            "kimne78kx3ncx6brgo4mv6wki5h1ko".equals(configuredClientId))
+        {
+            configManager.setConfiguration(
+                LiveRightNowConfig.GROUP,
+                LiveRightNowConfig.TWITCH_CLIENT_ID_KEY,
+                LiveRightNowConfig.TWITCH_DEFAULT_CLIENT_ID
+            );
+        }
     }
 
     @Override
     protected void shutDown()
     {
         stopPolling();
-        overlayManager.remove(bannerOverlay);
-        bannerOverlay.clearBanners();
         clientToolbar.removeNavigation(navButton);
         liveStateCache.clear();
         initialized = false;
         loginReminderSent = false;
-        log.info("Live Right Now plugin stopped");
     }
 
     @Subscribe
@@ -154,6 +152,7 @@ public class LiveRightNowPlugin extends Plugin
         if (event.getGameState() == GameState.LOGGED_IN)
         {
             checkAndSendConnectReminder();
+            executorService.execute(this::checkStreams);
         }
         else if (event.getGameState() == GameState.LOGIN_SCREEN)
         {
@@ -170,9 +169,7 @@ public class LiveRightNowPlugin extends Plugin
         }
 
         if (LiveRightNowConfig.TWITCH_OAUTH_TOKEN_KEY.equals(event.getKey()) ||
-            LiveRightNowConfig.KICK_OAUTH_TOKEN_KEY.equals(event.getKey()) ||
-            LiveRightNowConfig.TWITCH_CONNECTED_USER_KEY.equals(event.getKey()) ||
-            LiveRightNowConfig.KICK_CONNECTED_USER_KEY.equals(event.getKey()))
+            LiveRightNowConfig.TWITCH_CONNECTED_USER_KEY.equals(event.getKey()))
         {
             panel.refreshAccountsUi();
             executorService.execute(this::checkStreams);
@@ -216,13 +213,16 @@ public class LiveRightNowPlugin extends Plugin
     {
         try
         {
-            boolean twitchConnected = twitchOAuthManager.isConnected();
-            boolean kickConnected = kickOAuthManager.isConnected();
-
-            // Do not perform polling if no accounts are connected
-            if (!twitchConnected && !kickConnected)
+            if (client.getGameState() != GameState.LOGGED_IN)
             {
-                log.debug("No accounts connected. Skipping stream polling.");
+                return;
+            }
+
+            boolean twitchConnected = twitchOAuthManager.isConnected();
+            List<String> kickChannels = parseChannelList(config.kickStreamers());
+
+            if (!twitchConnected && kickChannels.isEmpty())
+            {
                 panel.updateStreams(Collections.emptyList());
                 return;
             }
@@ -246,19 +246,15 @@ public class LiveRightNowPlugin extends Plugin
                 }
             }
 
-            if (kickConnected)
+            if (!kickChannels.isEmpty())
             {
-                List<String> kickChannels = parseChannelList(config.kickStreamers());
-                if (!kickChannels.isEmpty())
+                List<StreamInfo> kickStreams = kickService.fetchStreams(kickChannels);
+                processStreamUpdates(kickStreams);
+                for (StreamInfo s : kickStreams)
                 {
-                    List<StreamInfo> kickStreams = kickService.fetchStreams(kickChannels);
-                    processStreamUpdates(kickStreams);
-                    for (StreamInfo s : kickStreams)
+                    if (s.isLive())
                     {
-                        if (s.isLive())
-                        {
-                            activeStreams.add(s);
-                        }
+                        activeStreams.add(s);
                     }
                 }
             }
@@ -279,6 +275,7 @@ public class LiveRightNowPlugin extends Plugin
     private void processStreamUpdates(List<StreamInfo> streams)
     {
         List<StreamInfo> newSessions = new ArrayList<>();
+        Map<String, String> pendingSessions = new HashMap<>();
         for (StreamInfo stream : streams)
         {
             String key = makeCacheKey(stream.getPlatform(), stream.getChannelName());
@@ -291,10 +288,7 @@ public class LiveRightNowPlugin extends Plugin
                 boolean newSession;
                 if (!sessionId.isEmpty())
                 {
-                    String notifiedSession = configManager.getConfiguration(
-                        LiveRightNowConfig.GROUP,
-                        NOTIFIED_SESSION_PREFIX + key
-                    );
+                    String notifiedSession = getNotifiedSession(key);
                     newSession = !sessionId.equals(notifiedSession);
                 }
                 else
@@ -305,14 +299,7 @@ public class LiveRightNowPlugin extends Plugin
                 if (newSession)
                 {
                     newSessions.add(stream);
-                    if (!sessionId.isEmpty())
-                    {
-                        configManager.setConfiguration(
-                            LiveRightNowConfig.GROUP,
-                            NOTIFIED_SESSION_PREFIX + key,
-                            sessionId
-                        );
-                    }
+                    pendingSessions.put(key, sessionId);
                 }
                 liveStateCache.put(key, true);
             }
@@ -327,11 +314,87 @@ public class LiveRightNowPlugin extends Plugin
         }
 
         notificationManager.notifyStreamersLive(newSessions);
+        for (Map.Entry<String, String> pendingSession : pendingSessions.entrySet())
+        {
+            if (!pendingSession.getValue().isEmpty())
+            {
+                saveNotifiedSession(pendingSession.getKey(), pendingSession.getValue());
+            }
+        }
     }
 
     private String makeCacheKey(Platform platform, String channelName)
     {
         return platform.name() + ":" + channelName.toLowerCase();
+    }
+
+    private String getNotifiedSession(String key)
+    {
+        String history = configManager.getConfiguration(
+            LiveRightNowConfig.GROUP,
+            LiveRightNowConfig.NOTIFIED_SESSIONS_KEY
+        );
+        if (history == null || history.isEmpty())
+        {
+            return null;
+        }
+
+        for (String entry : history.split("\\n"))
+        {
+            String prefix = key + "=";
+            if (entry.startsWith(prefix))
+            {
+                return entry.substring(prefix.length());
+            }
+        }
+        return null;
+    }
+
+    private void saveNotifiedSession(String key, String sessionId)
+    {
+        String history = configManager.getConfiguration(
+            LiveRightNowConfig.GROUP,
+            LiveRightNowConfig.NOTIFIED_SESSIONS_KEY
+        );
+        String prefix = key + "=";
+        StringBuilder updated = new StringBuilder();
+        boolean replaced = false;
+
+        if (history != null && !history.isEmpty())
+        {
+            for (String entry : history.split("\\n"))
+            {
+                if (entry.isEmpty())
+                {
+                    continue;
+                }
+                if (entry.startsWith(prefix))
+                {
+                    entry = prefix + sessionId;
+                    replaced = true;
+                }
+                if (updated.length() > 0)
+                {
+                    updated.append('\n');
+                }
+                updated.append(entry);
+            }
+        }
+
+        if (!replaced)
+        {
+            if (updated.length() > 0)
+            {
+                updated.append('\n');
+            }
+            updated.append(prefix).append(sessionId);
+        }
+
+        configManager.setConfiguration(
+            LiveRightNowConfig.GROUP,
+            LiveRightNowConfig.NOTIFIED_SESSIONS_KEY,
+            updated.toString()
+        );
     }
 
     static List<String> parseChannelList(String raw)
@@ -357,22 +420,11 @@ public class LiveRightNowPlugin extends Plugin
     private void checkAndSendConnectReminder()
     {
         boolean hasTwitchStreamers = !parseChannelList(config.twitchStreamers()).isEmpty();
-        boolean hasKickStreamers = !parseChannelList(config.kickStreamers()).isEmpty();
         boolean twitchConnected = twitchOAuthManager.isConnected();
-        boolean kickConnected = kickOAuthManager.isConnected();
 
         boolean needsTwitch = hasTwitchStreamers && !twitchConnected;
-        boolean needsKick = hasKickStreamers && !kickConnected;
 
-        if (needsTwitch && needsKick)
-        {
-            if (!loginReminderSent)
-            {
-                loginReminderSent = true;
-                notificationManager.notifyConnectReminder("Connect your Twitch and Kick accounts in the side panel to get started with stream notifications.");
-            }
-        }
-        else if (needsTwitch)
+        if (needsTwitch)
         {
             if (!loginReminderSent)
             {
@@ -380,18 +432,16 @@ public class LiveRightNowPlugin extends Plugin
                 notificationManager.notifyConnectReminder("Connect your Twitch account in the side panel to get started with stream notifications.");
             }
         }
-        else if (needsKick)
-        {
-            if (!loginReminderSent)
-            {
-                loginReminderSent = true;
-                notificationManager.notifyConnectReminder("Connect your Kick account in the side panel to get started with stream notifications.");
-            }
-        }
     }
 
     private BufferedImage createPluginIcon()
     {
+        BufferedImage resourceIcon = ImageUtil.loadImageResource(getClass(), "panel_icon.png");
+        if (resourceIcon != null)
+        {
+            return resourceIcon;
+        }
+
         int size = 16;
         BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = image.createGraphics();

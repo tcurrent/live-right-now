@@ -5,7 +5,10 @@ import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.GridLayout;
+import java.awt.Insets;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.List;
@@ -23,9 +26,9 @@ import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 
+import com.tcurrent.liverightnow.LiveRightNowConfig;
 import com.tcurrent.liverightnow.model.Platform;
 import com.tcurrent.liverightnow.model.StreamInfo;
-import com.tcurrent.liverightnow.oauth.KickOAuthManager;
 import com.tcurrent.liverightnow.oauth.TwitchOAuthManager;
 
 import net.runelite.client.ui.ColorScheme;
@@ -42,51 +45,72 @@ public class LiveRightNowPanel extends PluginPanel
     private static final Color DISCONNECT_RED = new Color(220, 53, 69);
 
     private final TwitchOAuthManager twitchOAuthManager;
-    private final KickOAuthManager kickOAuthManager;
+    private final LiveRightNowConfig config;
 
     private final JPanel contentPanel = new JPanel();
     private final JPanel accountsPanel = new JPanel();
     private final JPanel streamsPanel = new JPanel();
 
     @Inject
-    public LiveRightNowPanel(TwitchOAuthManager twitchOAuthManager, KickOAuthManager kickOAuthManager)
+    public LiveRightNowPanel(TwitchOAuthManager twitchOAuthManager, LiveRightNowConfig config)
     {
         super(false);
         this.twitchOAuthManager = twitchOAuthManager;
-        this.kickOAuthManager = kickOAuthManager;
+        this.config = config;
 
         setLayout(new BorderLayout());
         setBackground(ColorScheme.DARK_GRAY_COLOR);
 
-        contentPanel.setLayout(new BoxLayout(contentPanel, BoxLayout.Y_AXIS));
+        contentPanel.setLayout(new GridBagLayout());
         contentPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
         contentPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
         // Header Title
-        JLabel titleLabel = new JLabel("Live Right Now", SwingConstants.CENTER);
+        JPanel titleRow = new JPanel(new BorderLayout());
+        titleRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        titleRow.setAlignmentX(LEFT_ALIGNMENT);
+
+        JLabel titleLabel = new JLabel("Live Right Now", SwingConstants.LEFT);
         titleLabel.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 16));
         titleLabel.setForeground(Color.WHITE);
-        titleLabel.setAlignmentX(CENTER_ALIGNMENT);
-        titleLabel.setBorder(new EmptyBorder(0, 0, 12, 0));
-        contentPanel.add(titleLabel);
+        titleLabel.setHorizontalAlignment(SwingConstants.LEFT);
+        titleRow.add(titleLabel, BorderLayout.WEST);
+        titleRow.setBorder(new EmptyBorder(0, 0, 12, 0));
+        titleRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, titleRow.getPreferredSize().height));
+        addFullWidth(titleRow, 0, new Insets(0, 0, 12, 0));
 
         // Accounts Container
         accountsPanel.setLayout(new BoxLayout(accountsPanel, BoxLayout.Y_AXIS));
         accountsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        contentPanel.add(accountsPanel);
+        addFullWidth(accountsPanel, 1, new Insets(0, 0, 0, 0));
 
-        contentPanel.add(Box.createRigidArea(new Dimension(0, 15)));
+        addFullWidth(Box.createRigidArea(new Dimension(0, 15)), 2, new Insets(0, 0, 0, 0));
 
         // Streams Container
-        JLabel streamsHeader = new JLabel("Live Streams");
+        JPanel streamsHeaderRow = new JPanel(new BorderLayout());
+        streamsHeaderRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        streamsHeaderRow.setAlignmentX(LEFT_ALIGNMENT);
+
+        JLabel streamsHeader = new JLabel("Live Streams", SwingConstants.LEFT);
         streamsHeader.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
         streamsHeader.setForeground(ColorScheme.BRAND_ORANGE);
-        streamsHeader.setBorder(new EmptyBorder(0, 0, 6, 0));
-        contentPanel.add(streamsHeader);
+        streamsHeader.setHorizontalAlignment(SwingConstants.LEFT);
+        streamsHeaderRow.add(streamsHeader, BorderLayout.WEST);
+        streamsHeaderRow.setBorder(new EmptyBorder(0, 0, 6, 0));
+        streamsHeaderRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, streamsHeaderRow.getPreferredSize().height));
+        addFullWidth(streamsHeaderRow, 3, new Insets(0, 0, 6, 0));
 
         streamsPanel.setLayout(new BoxLayout(streamsPanel, BoxLayout.Y_AXIS));
         streamsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        contentPanel.add(streamsPanel);
+        addFullWidth(streamsPanel, 4, new Insets(0, 0, 0, 0));
+
+        GridBagConstraints bottomFiller = new GridBagConstraints();
+        bottomFiller.gridx = 0;
+        bottomFiller.gridy = 5;
+        bottomFiller.weightx = 1.0;
+        bottomFiller.weighty = 1.0;
+        bottomFiller.fill = GridBagConstraints.BOTH;
+        contentPanel.add(Box.createGlue(), bottomFiller);
 
         JScrollPane scrollPane = new JScrollPane(contentPanel);
         scrollPane.setBorder(null);
@@ -97,6 +121,18 @@ public class LiveRightNowPanel extends PluginPanel
 
         refreshAccountsUi();
         updateStreams(null);
+    }
+
+    private void addFullWidth(java.awt.Component component, int row, Insets insets)
+    {
+        GridBagConstraints constraints = new GridBagConstraints();
+        constraints.gridx = 0;
+        constraints.gridy = row;
+        constraints.weightx = 1.0;
+        constraints.fill = GridBagConstraints.HORIZONTAL;
+        constraints.anchor = GridBagConstraints.WEST;
+        constraints.insets = insets;
+        contentPanel.add(component, constraints);
     }
 
     public final void refreshAccountsUi()
@@ -120,18 +156,9 @@ public class LiveRightNowPanel extends PluginPanel
             accountsPanel.add(Box.createRigidArea(new Dimension(0, 8)));
 
             // Kick Section
-            accountsPanel.add(createAccountCard(
-                "Kick",
-                KICK_GREEN,
-                kickOAuthManager.isConnected(),
-                kickOAuthManager.getConnectedUser(),
-                () -> kickOAuthManager.startConnectFlow().thenAccept(ok -> refreshAccountsUi()),
-                () -> {
-                    kickOAuthManager.disconnect();
-                    refreshAccountsUi();
-                }
-            ));
+            accountsPanel.add(createPublicMonitoringCard("Kick"));
 
+            accountsPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, accountsPanel.getPreferredSize().height));
             accountsPanel.revalidate();
             accountsPanel.repaint();
         });
@@ -142,20 +169,31 @@ public class LiveRightNowPanel extends PluginPanel
         SwingUtilities.invokeLater(() -> {
             streamsPanel.removeAll();
 
-            boolean anyConnected = twitchOAuthManager.isConnected() || kickOAuthManager.isConnected();
+            boolean anyConnected = twitchOAuthManager.isConnected() ||
+                (config.kickStreamers() != null && !config.kickStreamers().trim().isEmpty());
             if (!anyConnected)
             {
-                JLabel warningLabel = new JLabel("<html><center style='color:#aaa;'>Connect your Twitch or Kick account above to start receiving alerts.</center></html>");
+                JPanel warningRow = new JPanel(new BorderLayout());
+                warningRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+                warningRow.setAlignmentX(LEFT_ALIGNMENT);
+                JLabel warningLabel = new JLabel("<html><body style='color:#aaa;width:180px;'>Connect an account above to start receiving alerts.</body></html>");
                 warningLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
-                warningLabel.setBorder(new EmptyBorder(10, 5, 10, 5));
-                streamsPanel.add(warningLabel);
+                warningLabel.setHorizontalAlignment(SwingConstants.LEFT);
+                warningRow.setBorder(new EmptyBorder(10, 5, 10, 5));
+                warningRow.add(warningLabel, BorderLayout.WEST);
+                streamsPanel.add(warningRow);
             }
             else if (streams == null || streams.isEmpty())
             {
-                JLabel emptyLabel = new JLabel("<html><center style='color:#888;'>No tracked streamers online right now.</center></html>");
+                JPanel emptyRow = new JPanel(new BorderLayout());
+                emptyRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+                emptyRow.setAlignmentX(LEFT_ALIGNMENT);
+                JLabel emptyLabel = new JLabel("<html><body style='color:#888;'>No tracked streamers online right now.</body></html>");
                 emptyLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
-                emptyLabel.setBorder(new EmptyBorder(10, 5, 10, 5));
-                streamsPanel.add(emptyLabel);
+                emptyLabel.setHorizontalAlignment(SwingConstants.LEFT);
+                emptyRow.setBorder(new EmptyBorder(10, 5, 10, 5));
+                emptyRow.add(emptyLabel, BorderLayout.WEST);
+                streamsPanel.add(emptyRow);
             }
             else
             {
@@ -166,6 +204,7 @@ public class LiveRightNowPanel extends PluginPanel
                 }
             }
 
+            streamsPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, streamsPanel.getPreferredSize().height));
             streamsPanel.revalidate();
             streamsPanel.repaint();
         });
@@ -180,30 +219,33 @@ public class LiveRightNowPanel extends PluginPanel
             new EmptyBorder(8, 10, 8, 10)
         ));
 
-        JPanel topRow = new JPanel(new BorderLayout());
+        JPanel topRow = new JPanel();
+        topRow.setLayout(new BoxLayout(topRow, BoxLayout.Y_AXIS));
         topRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 
         JLabel platformLabel = new JLabel(platformName);
         platformLabel.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
         platformLabel.setForeground(Color.WHITE);
-        topRow.add(platformLabel, BorderLayout.WEST);
+        platformLabel.setAlignmentX(LEFT_ALIGNMENT);
+        topRow.add(platformLabel);
 
         JLabel statusBadge = new JLabel(isConnected ? "● Connected" : "○ Disconnected");
         statusBadge.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
         statusBadge.setForeground(isConnected ? STATUS_ONLINE_COLOR : STATUS_OFFLINE_COLOR);
-        topRow.add(statusBadge, BorderLayout.EAST);
+        statusBadge.setAlignmentX(LEFT_ALIGNMENT);
+        topRow.add(statusBadge);
 
         card.add(topRow, BorderLayout.NORTH);
 
-        if (isConnected && username != null && !username.trim().isEmpty())
-        {
-            JLabel userLabel = new JLabel("User: " + username);
-            userLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
-            userLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-            card.add(userLabel, BorderLayout.CENTER);
-        }
+        JLabel userLabel = new JLabel(isConnected && username != null && !username.trim().isEmpty()
+            ? "User: " + username
+            : "No account connected");
+        userLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
+        userLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        card.add(userLabel, BorderLayout.CENTER);
 
-        JPanel btnPanel = new JPanel(new GridLayout(1, isConnected ? 2 : 1, 5, 0));
+        JPanel btnPanel = new JPanel();
+        btnPanel.setLayout(new BoxLayout(btnPanel, BoxLayout.Y_AXIS));
         btnPanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         btnPanel.setBorder(new EmptyBorder(4, 0, 0, 0));
 
@@ -211,12 +253,20 @@ public class LiveRightNowPanel extends PluginPanel
         {
             JButton reconnectBtn = new JButton("Reconnect");
             reconnectBtn.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
+            reconnectBtn.setHorizontalAlignment(SwingConstants.LEFT);
+            reconnectBtn.setAlignmentX(LEFT_ALIGNMENT);
+            reconnectBtn.setMaximumSize(reconnectBtn.getPreferredSize());
             reconnectBtn.addActionListener(e -> onConnect.run());
             btnPanel.add(reconnectBtn);
+
+            btnPanel.add(Box.createRigidArea(new Dimension(0, 4)));
 
             JButton disconnectBtn = new JButton("Disconnect");
             disconnectBtn.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
             disconnectBtn.setForeground(DISCONNECT_RED);
+            disconnectBtn.setHorizontalAlignment(SwingConstants.LEFT);
+            disconnectBtn.setAlignmentX(LEFT_ALIGNMENT);
+            disconnectBtn.setMaximumSize(disconnectBtn.getPreferredSize());
             disconnectBtn.addActionListener(e -> onDisconnect.run());
             btnPanel.add(disconnectBtn);
         }
@@ -224,11 +274,40 @@ public class LiveRightNowPanel extends PluginPanel
         {
             JButton connectBtn = new JButton("Connect " + platformName);
             connectBtn.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 11));
+            connectBtn.setHorizontalAlignment(SwingConstants.LEFT);
+            connectBtn.setAlignmentX(LEFT_ALIGNMENT);
+            connectBtn.setMaximumSize(connectBtn.getPreferredSize());
             connectBtn.addActionListener(e -> onConnect.run());
             btnPanel.add(connectBtn);
         }
 
         card.add(btnPanel, BorderLayout.SOUTH);
+
+        // BorderLayout reports an unbounded maximum size, which makes BoxLayout stretch the card; clamp it.
+        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, card.getPreferredSize().height));
+        return card;
+    }
+
+    private JPanel createPublicMonitoringCard(String platformName)
+    {
+        JPanel card = new JPanel(new BorderLayout(5, 5));
+        card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        card.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 3, 0, 0, KICK_GREEN),
+            new EmptyBorder(8, 10, 8, 10)
+        ));
+
+        JLabel platformLabel = new JLabel(platformName);
+        platformLabel.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
+        platformLabel.setForeground(Color.WHITE);
+        card.add(platformLabel, BorderLayout.NORTH);
+
+        JLabel statusLabel = new JLabel("Public monitoring - no account required");
+        statusLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
+        statusLabel.setForeground(STATUS_ONLINE_COLOR);
+        card.add(statusLabel, BorderLayout.CENTER);
+
+        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, card.getPreferredSize().height));
         return card;
     }
 
@@ -246,22 +325,25 @@ public class LiveRightNowPanel extends PluginPanel
             @Override
             public void mouseClicked(MouseEvent e)
             {
-                LinkBrowser.open(stream.getStreamUrl());
+                LinkBrowser.browse(stream.getStreamUrl());
             }
         });
 
-        JPanel headerRow = new JPanel(new BorderLayout());
+        JPanel headerRow = new JPanel();
+        headerRow.setLayout(new BoxLayout(headerRow, BoxLayout.Y_AXIS));
         headerRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 
         JLabel nameLabel = new JLabel(stream.getChannelName());
         nameLabel.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
         nameLabel.setForeground(Color.WHITE);
-        headerRow.add(nameLabel, BorderLayout.WEST);
+        nameLabel.setAlignmentX(LEFT_ALIGNMENT);
+        headerRow.add(nameLabel);
 
         JLabel liveStatus = new JLabel(stream.isLive() ? "● " + stream.getViewerCount() + " viewers" : "Offline");
         liveStatus.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
         liveStatus.setForeground(stream.isLive() ? STATUS_ONLINE_COLOR : STATUS_OFFLINE_COLOR);
-        headerRow.add(liveStatus, BorderLayout.EAST);
+        liveStatus.setAlignmentX(LEFT_ALIGNMENT);
+        headerRow.add(liveStatus);
 
         card.add(headerRow, BorderLayout.NORTH);
 
@@ -289,6 +371,7 @@ public class LiveRightNowPanel extends PluginPanel
             card.add(body, BorderLayout.CENTER);
         }
 
+        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, card.getPreferredSize().height));
         return card;
     }
 

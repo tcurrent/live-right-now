@@ -69,7 +69,7 @@ public class TwitchService
 
         if (clientId.isEmpty() || token.isEmpty())
         {
-            log.debug("Twitch Client ID or OAuth Token is not configured. Skipping Twitch lookup.");
+            log.warn("Twitch Client ID or OAuth Token is not configured. Skipping Twitch lookup.");
             return Collections.emptyList();
         }
 

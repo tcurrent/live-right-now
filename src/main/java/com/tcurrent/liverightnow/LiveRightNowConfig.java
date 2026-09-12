@@ -1,26 +1,23 @@
 package com.tcurrent.liverightnow;
 
-import java.awt.Color;
-
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
-import net.runelite.client.config.Range;
 
 @ConfigGroup(LiveRightNowConfig.GROUP)
 public interface LiveRightNowConfig extends Config
 {
     String GROUP = "liverightnow";
+    String TWITCH_DEFAULT_CLIENT_ID = "ka3clhecbpbyijmalu7th9rkfuol9f";
 
     String TWITCH_STREAMERS_KEY = "twitchStreamers";
     String TWITCH_CLIENT_ID_KEY = "twitchClientId";
     String TWITCH_OAUTH_TOKEN_KEY = "twitchOAuthToken";
     String TWITCH_CONNECTED_USER_KEY = "twitchConnectedUser";
+    String NOTIFIED_SESSIONS_KEY = "notifiedSessions";
 
     String KICK_STREAMERS_KEY = "kickStreamers";
-    String KICK_OAUTH_TOKEN_KEY = "kickOAuthToken";
-    String KICK_CONNECTED_USER_KEY = "kickConnectedUser";
 
     @ConfigSection(
         name = "Twitch",
@@ -31,10 +28,9 @@ public interface LiveRightNowConfig extends Config
 
     @ConfigItem(
         keyName = TWITCH_CONNECTED_USER_KEY,
-        name = "Connected Account",
-        description = "The Twitch account currently connected via OAuth",
-        position = 1,
-        section = TWITCH_SECTION
+        name = "",
+        description = "",
+        hidden = true
     )
     default String twitchConnectedUser()
     {
@@ -61,7 +57,7 @@ public interface LiveRightNowConfig extends Config
     )
     default String twitchClientId()
     {
-        return "kimne78kx3ncx6brgo4mv6wki5h1ko";
+        return TWITCH_DEFAULT_CLIENT_ID;
     }
 
     @ConfigItem(
@@ -76,24 +72,24 @@ public interface LiveRightNowConfig extends Config
         return "";
     }
 
+    @ConfigItem(
+        keyName = NOTIFIED_SESSIONS_KEY,
+        name = "",
+        description = "",
+        hidden = true,
+        secret = true
+    )
+    default String notifiedSessions()
+    {
+        return "";
+    }
+
     @ConfigSection(
         name = "Kick",
         description = "Settings for Kick streamer alerts",
         position = 10
     )
     String KICK_SECTION = "kickSection";
-
-    @ConfigItem(
-        keyName = KICK_CONNECTED_USER_KEY,
-        name = "Connected Account",
-        description = "The Kick account currently connected via OAuth",
-        position = 11,
-        section = KICK_SECTION
-    )
-    default String kickConnectedUser()
-    {
-        return "";
-    }
 
     @ConfigItem(
         keyName = KICK_STREAMERS_KEY,
@@ -107,18 +103,6 @@ public interface LiveRightNowConfig extends Config
         return "";
     }
 
-    @ConfigItem(
-        keyName = KICK_OAUTH_TOKEN_KEY,
-        name = "",
-        description = "",
-        hidden = true,
-        secret = true
-    )
-    default String kickOAuthToken()
-    {
-        return "";
-    }
-
     @ConfigSection(
         name = "Notifications",
         description = "Notification preferences",
@@ -127,35 +111,10 @@ public interface LiveRightNowConfig extends Config
     String NOTIFICATION_SECTION = "notificationSection";
 
     @ConfigItem(
-        keyName = "bannerNotificationEnabled",
-        name = "In-game popup banner",
-        description = "Display a Combat Achievement style banner at the top of the screen when a streamer goes live",
-        position = 21,
-        section = NOTIFICATION_SECTION
-    )
-    default boolean bannerNotificationEnabled()
-    {
-        return true;
-    }
-
-    @Range(min = 2, max = 15)
-    @ConfigItem(
-        keyName = "bannerDurationSeconds",
-        name = "Banner duration (sec)",
-        description = "How long the in-game popup banner remains on screen",
-        position = 22,
-        section = NOTIFICATION_SECTION
-    )
-    default int bannerDurationSeconds()
-    {
-        return 5;
-    }
-
-    @ConfigItem(
         keyName = "chatMessageEnabled",
         name = "In-game chat message",
         description = "Show the notification in the in-game chat window",
-        position = 23,
+        position = 21,
         section = NOTIFICATION_SECTION
     )
     default boolean chatMessageEnabled()
@@ -167,7 +126,7 @@ public interface LiveRightNowConfig extends Config
         keyName = "notificationEnabled",
         name = "RuneLite notifications",
         description = "Show a RuneLite desktop notification when a streamer goes live",
-        position = 24,
+        position = 22,
         section = NOTIFICATION_SECTION
     )
     default boolean notificationEnabled()
@@ -175,15 +134,4 @@ public interface LiveRightNowConfig extends Config
         return false;
     }
 
-    @ConfigItem(
-        keyName = "messageColor",
-        name = "Message color",
-        description = "Color for the stream alert message text in the in-game chat window",
-        position = 25,
-        section = NOTIFICATION_SECTION
-    )
-    default Color messageColor()
-    {
-        return Color.WHITE;
-    }
 }

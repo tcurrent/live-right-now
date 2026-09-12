@@ -14,11 +14,8 @@ import org.slf4j.LoggerFactory;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import com.tcurrent.liverightnow.LiveRightNowConfig;
 import com.tcurrent.liverightnow.model.Platform;
 import com.tcurrent.liverightnow.model.StreamInfo;
-import com.tcurrent.liverightnow.notification.StreamNotificationManager;
-import com.tcurrent.liverightnow.oauth.KickOAuthManager;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -33,24 +30,15 @@ public class KickService
 
     private final OkHttpClient okHttpClient;
     private final Gson gson;
-    private final LiveRightNowConfig config;
-    private final KickOAuthManager kickOAuthManager;
-    private final StreamNotificationManager notificationManager;
 
     @Inject
     public KickService(
         OkHttpClient okHttpClient,
-        Gson gson,
-        LiveRightNowConfig config,
-        KickOAuthManager kickOAuthManager,
-        StreamNotificationManager notificationManager
+        Gson gson
     )
     {
         this.okHttpClient = okHttpClient;
         this.gson = gson;
-        this.config = config;
-        this.kickOAuthManager = kickOAuthManager;
-        this.notificationManager = notificationManager;
     }
 
     public List<StreamInfo> fetchStreams(List<String> usernames)
@@ -84,27 +72,12 @@ public class KickService
             .header("User-Agent", "RuneLite-LiveRightNowPlugin")
             .get();
 
-        String token = config.kickOAuthToken();
-        if (token != null && !token.trim().isEmpty())
-        {
-            requestBuilder.header("Authorization", "Bearer " + token.trim());
-        }
-
         Request request = requestBuilder.build();
 
         try (Response response = okHttpClient.newCall(request).execute())
         {
-            if (response.code() == 401)
-            {
-                log.warn("Kick API returned 401 Unauthorized (OAuth token expired).");
-                kickOAuthManager.handleTokenExpired();
-                notificationManager.notifySessionExpired(Platform.KICK);
-                return StreamInfo.offline(Platform.KICK, username);
-            }
-
             if (!response.isSuccessful())
             {
-                log.debug("Kick API returned status {} for user {}", response.code(), username);
                 return StreamInfo.offline(Platform.KICK, username);
             }
 
@@ -152,7 +125,7 @@ public class KickService
         }
         catch (IOException | RuntimeException e)
         {
-            log.debug("Failed to query Kick channel: {}", username, e);
+            log.warn("Failed to query Kick channel: {}", username, e);
             return StreamInfo.offline(Platform.KICK, username);
         }
     }
