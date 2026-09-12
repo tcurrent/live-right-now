@@ -166,7 +166,15 @@ public class TwitchService
                 StreamInfo stream = liveMap.get(lower);
                 if (stream != null)
                 {
-                    results.add(stream);
+                    results.add(new StreamInfo(
+                        Platform.TWITCH,
+                        user.trim(),
+                        stream.isLive(),
+                        stream.getTitle(),
+                        stream.getCategory(),
+                        stream.getViewerCount(),
+                        stream.getSessionId()
+                    ));
                 }
                 else
                 {
