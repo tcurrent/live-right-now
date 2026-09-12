@@ -21,3 +21,7 @@ A RuneLite plugin that tracks selected Twitch and Kick streamers and alerts you 
 2. Click **Connect Twitch** and/or **Connect Kick** to authorize your accounts.
 3. Add comma-separated usernames under **Tracked Streamers** in the **Twitch** and/or **Kick** sections (e.g. `b0aty, odablock, paymoneywubby`).
 4. Customize your in-game chat or desktop notification preferences under **Notifications**.
+
+## How authorization works
+
+Clicking **Connect Twitch** or **Connect Kick** opens your browser to the [Live Right Now OAuth Proxy](https://github.com/tcurrent/live-right-now-oauth-proxy), which handles the Twitch/Kick authorization code exchange and hands the resulting access token back to a short-lived local listener on `localhost:4646`. The token never leaves your machine except to reach Twitch/Kick and the proxy directly, and each authorization attempt is tied to a single-use nonce so the local callback rejects any request that doesn't match it.
