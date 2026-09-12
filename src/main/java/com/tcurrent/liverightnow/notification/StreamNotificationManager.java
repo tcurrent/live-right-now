@@ -1,6 +1,9 @@
 package com.tcurrent.liverightnow.notification;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import javax.inject.Inject;
@@ -48,38 +51,59 @@ public class StreamNotificationManager
             return;
         }
 
-        if (streams.size() == 1)
+        List<MergedStream> merged = mergeByChannelName(streams);
+
+        if (merged.size() == 1)
         {
-            notifySingleStreamerLive(streams.get(0));
+            notifySingleStreamerLive(merged.get(0));
             return;
         }
 
         if (config.chatMessageEnabled())
         {
-            sendInGameChat(streams);
+            sendInGameChat(merged);
         }
 
         if (config.notificationEnabled())
         {
-            String names = formatStreamerNames(streams);
-            notifier.notify(streams.size() + " tracked streamers are now live: " + names);
+            String names = formatStreamerNames(merged);
+            notifier.notify(merged.size() + " tracked streamers are now live: " + names);
         }
     }
 
-    private void notifySingleStreamerLive(StreamInfo stream)
+    // Combines entries for the same streamer so being live on Twitch and Kick at once
+    // produces a single "X is now live on Twitch and Kick" message instead of two.
+    private List<MergedStream> mergeByChannelName(List<StreamInfo> streams)
     {
-        String platformName = stream.getPlatform().getDisplayName();
-        String channel = stream.getChannelName();
-        String title = stream.getTitle();
+        Map<String, MergedStream> merged = new LinkedHashMap<>();
+        for (StreamInfo stream : streams)
+        {
+            String key = stream.getChannelName().toLowerCase();
+            MergedStream existing = merged.get(key);
+            if (existing == null)
+            {
+                merged.put(key, new MergedStream(stream.getChannelName(), stream.getPlatform().getDisplayName(), stream.getTitle()));
+            }
+            else
+            {
+                existing.platformNames.add(stream.getPlatform().getDisplayName());
+            }
+        }
+        return new ArrayList<>(merged.values());
+    }
+
+    private void notifySingleStreamerLive(MergedStream stream)
+    {
+        String platformLabel = stream.platformLabel();
 
         if (config.chatMessageEnabled())
         {
-            sendInGameChat(stream, platformName, channel, title);
+            sendInGameMessage("[Live Right Now] " + stream.channelName + " is now live on " + platformLabel);
         }
 
         if (config.notificationEnabled())
         {
-            sendDesktopNotification(platformName, channel, title);
+            notifier.notify(stream.channelName + " is now live on " + platformLabel);
         }
     }
 
@@ -93,12 +117,7 @@ public class StreamNotificationManager
         sendInGameMessage("[Live Right Now] " + messageText);
     }
 
-    private void sendInGameChat(StreamInfo stream, String platformName, String channel, String title)
-    {
-        sendInGameMessage("[Live Right Now] " + channel + " is now live on " + platformName);
-    }
-
-    private void sendInGameChat(List<StreamInfo> streams)
+    private void sendInGameChat(List<MergedStream> streams)
     {
         StringBuilder message = new StringBuilder("[Live Right Now] ")
             .append(streams.size()).append(" tracked streamers are now live: ");
@@ -109,7 +128,7 @@ public class StreamNotificationManager
             {
                 message.append(", ");
             }
-            message.append(streams.get(i).getChannelName());
+            message.append(streams.get(i).displayName());
         }
 
         int remaining = streams.size() - displayed;
@@ -135,11 +154,11 @@ public class StreamNotificationManager
         ));
     }
 
-    private String formatStreamerNames(List<StreamInfo> streams)
+    private String formatStreamerNames(List<MergedStream> streams)
     {
         String names = streams.stream()
             .limit(3)
-            .map(StreamInfo::getChannelName)
+            .map(MergedStream::displayName)
             .collect(Collectors.joining(", "));
 
         int remaining = streams.size() - 3;
@@ -150,8 +169,28 @@ public class StreamNotificationManager
         return names;
     }
 
-    private void sendDesktopNotification(String platformName, String channel, String title)
+    private static final class MergedStream
     {
-        notifier.notify(channel + " is now live on " + platformName);
+        final String channelName;
+        final List<String> platformNames;
+        final String title;
+
+        MergedStream(String channelName, String platformName, String title)
+        {
+            this.channelName = channelName;
+            this.platformNames = new ArrayList<>();
+            this.platformNames.add(platformName);
+            this.title = title;
+        }
+
+        String platformLabel()
+        {
+            return String.join(" and ", platformNames);
+        }
+
+        String displayName()
+        {
+            return platformNames.size() > 1 ? channelName + " (" + platformLabel() + ")" : channelName;
+        }
     }
 }

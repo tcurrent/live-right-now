@@ -240,6 +240,7 @@ public class LiveRightNowPlugin extends Plugin
             }
 
             List<StreamInfo> activeStreams = new ArrayList<>();
+            List<StreamInfo> newSessions = new ArrayList<>();
 
             if (twitchConnected)
             {
@@ -247,7 +248,7 @@ public class LiveRightNowPlugin extends Plugin
                 if (!twitchChannels.isEmpty())
                 {
                     List<StreamInfo> twitchStreams = twitchService.fetchStreams(twitchChannels);
-                    processStreamUpdates(twitchStreams);
+                    newSessions.addAll(processStreamUpdates(twitchStreams));
                     for (StreamInfo s : twitchStreams)
                     {
                         if (s.isLive())
@@ -264,7 +265,7 @@ public class LiveRightNowPlugin extends Plugin
                 if (!kickChannels.isEmpty())
                 {
                     List<StreamInfo> kickStreams = kickService.fetchStreams(kickChannels);
-                    processStreamUpdates(kickStreams);
+                    newSessions.addAll(processStreamUpdates(kickStreams));
                     for (StreamInfo s : kickStreams)
                     {
                         if (s.isLive())
@@ -274,6 +275,10 @@ public class LiveRightNowPlugin extends Plugin
                     }
                 }
             }
+
+            // Notified once across both platforms so a streamer live on Twitch and Kick
+            // simultaneously gets a single combined message instead of two separate ones.
+            notificationManager.notifyStreamersLive(newSessions);
 
             panel.updateStreams(activeStreams);
 
@@ -288,7 +293,7 @@ public class LiveRightNowPlugin extends Plugin
         }
     }
 
-    private void processStreamUpdates(List<StreamInfo> streams)
+    private List<StreamInfo> processStreamUpdates(List<StreamInfo> streams)
     {
         List<StreamInfo> newSessions = new ArrayList<>();
         Map<String, String> pendingSessions = new HashMap<>();
@@ -304,8 +309,10 @@ public class LiveRightNowPlugin extends Plugin
                 boolean newSession;
                 if (!sessionId.isEmpty())
                 {
+                    // wasLive gates re-notification within this run (e.g. after a config reset
+                    // clears notifiedSessions); the persisted value gates it across restarts.
                     String notifiedSession = getNotifiedSession(key);
-                    newSession = !sessionId.equals(notifiedSession);
+                    newSession = !wasLive && !sessionId.equals(notifiedSession);
                 }
                 else
                 {
@@ -329,7 +336,6 @@ public class LiveRightNowPlugin extends Plugin
             }
         }
 
-        notificationManager.notifyStreamersLive(newSessions);
         for (Map.Entry<String, String> pendingSession : pendingSessions.entrySet())
         {
             if (!pendingSession.getValue().isEmpty())
@@ -337,6 +343,8 @@ public class LiveRightNowPlugin extends Plugin
                 saveNotifiedSession(pendingSession.getKey(), pendingSession.getValue());
             }
         }
+
+        return newSessions;
     }
 
     private String makeCacheKey(Platform platform, String channelName)
