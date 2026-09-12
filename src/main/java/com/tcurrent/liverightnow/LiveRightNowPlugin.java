@@ -45,7 +45,6 @@ import net.runelite.client.util.ImageUtil;
 @PluginDescriptor(
     name = "Live Right Now",
     description = "Tracks specific Twitch and Kick streamers and alerts when they go live",
-    enabledByDefault = false,
     tags = {"live", "activity", "tracker", "twitch", "kick", "stream", "notifications"}
 )
 public class LiveRightNowPlugin extends Plugin
