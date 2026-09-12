@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -14,7 +15,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.tcurrent.liverightnow.LiveRightNowConfig;
@@ -40,6 +40,10 @@ public class KickService
     private final LiveRightNowConfig config;
     private final KickOAuthManager kickOAuthManager;
     private final StreamNotificationManager notificationManager;
+
+    // Kick's public channels endpoint keys live status off broadcaster_user_id;
+    // slugs are only usable for the initial lookup, so cache the resolved id per username.
+    private final Map<String, Long> resolvedBroadcasterIds = new ConcurrentHashMap<>();
 
     @Inject
     public KickService(
@@ -76,20 +80,116 @@ public class KickService
             token = token.substring(7).trim();
         }
 
-        HttpUrl baseUrl = HttpUrl.parse(KICK_CHANNELS_API_URL);
-        if (baseUrl == null)
-        {
-            return Collections.emptyList();
-        }
-
-        HttpUrl.Builder urlBuilder = baseUrl.newBuilder();
+        List<String> normalizedUsers = new ArrayList<>();
         for (String user : usernames)
         {
             String trimmed = user.trim().toLowerCase();
             if (!trimmed.isEmpty())
             {
-                urlBuilder.addQueryParameter("slug", trimmed);
+                normalizedUsers.add(trimmed);
             }
+        }
+
+        if (normalizedUsers.isEmpty())
+        {
+            return Collections.emptyList();
+        }
+
+        List<String> unresolved = new ArrayList<>();
+        List<Long> resolvedIds = new ArrayList<>();
+        for (String user : normalizedUsers)
+        {
+            Long id = resolvedBroadcasterIds.get(user);
+            if (id != null)
+            {
+                resolvedIds.add(id);
+            }
+            else
+            {
+                unresolved.add(user);
+            }
+        }
+
+        // Kick's channels endpoint disallows mixing slug and broadcaster_user_id in a single request.
+        Map<String, JsonObject> channelsByUsername = new HashMap<>();
+        if (!unresolved.isEmpty())
+        {
+            List<JsonObject> channels = requestChannels("slug", unresolved, token);
+            if (channels == null)
+            {
+                return Collections.emptyList();
+            }
+            for (JsonObject channelObj : channels)
+            {
+                String slug = getString(channelObj, "slug");
+                if (slug.isEmpty())
+                {
+                    continue;
+                }
+                Long id = getLong(channelObj, "broadcaster_user_id");
+                if (id != null)
+                {
+                    resolvedBroadcasterIds.put(slug.toLowerCase(), id);
+                }
+                channelsByUsername.put(slug.toLowerCase(), channelObj);
+            }
+        }
+
+        if (!resolvedIds.isEmpty())
+        {
+            List<String> idStrings = new ArrayList<>();
+            for (Long id : resolvedIds)
+            {
+                idStrings.add(String.valueOf(id));
+            }
+            List<JsonObject> channels = requestChannels("broadcaster_user_id", idStrings, token);
+            if (channels == null)
+            {
+                return Collections.emptyList();
+            }
+            for (JsonObject channelObj : channels)
+            {
+                String slug = getString(channelObj, "slug");
+                if (!slug.isEmpty())
+                {
+                    channelsByUsername.put(slug.toLowerCase(), channelObj);
+                }
+            }
+        }
+
+        List<StreamInfo> results = new ArrayList<>();
+        for (String user : usernames)
+        {
+            String lower = user.trim().toLowerCase();
+            if (lower.isEmpty())
+            {
+                continue;
+            }
+
+            JsonObject channelObj = channelsByUsername.get(lower);
+            results.add(channelObj != null
+                ? parseChannel(user.trim(), channelObj)
+                : StreamInfo.offline(Platform.KICK, user.trim()));
+        }
+
+        return results;
+    }
+
+    /**
+     * Returns null on a request failure (401/unsuccessful/IO error) so callers can bail out entirely.
+     */
+    private List<JsonObject> requestChannels(String paramName, List<String> values, String token)
+    {
+        HttpUrl baseUrl = HttpUrl.parse(KICK_CHANNELS_API_URL);
+        if (baseUrl == null)
+        {
+            return null;
+        }
+
+        HttpUrl.Builder urlBuilder = baseUrl.newBuilder();
+        for (String value : values)
+        {
+            urlBuilder.addQueryParameter(paramName, value);
         }
 
         Request request = new Request.Builder()
@@ -106,13 +206,13 @@ public class KickService
                 log.warn("Kick API returned 401 Unauthorized (OAuth token expired).");
                 kickOAuthManager.handleTokenExpired();
                 notificationManager.notifySessionExpired(Platform.KICK);
-                return Collections.emptyList();
+                return null;
             }
 
             if (!response.isSuccessful())
             {
                 log.warn("Kick API returned unsuccessful response code: {}", response.code());
-                return Collections.emptyList();
+                return null;
             }
 
             ResponseBody body = response.body();
@@ -122,111 +222,62 @@ public class KickService
             }
 
             JsonObject json = gson.fromJson(body.charStream(), JsonObject.class);
-            if (json == null || !json.has("data"))
+            if (json == null || !json.has("data") || !json.get("data").isJsonArray())
             {
                 return Collections.emptyList();
             }
 
-            Map<String, StreamInfo> streamMap = new HashMap<>();
-            JsonArray dataArray = json.getAsJsonArray("data");
-            for (JsonElement element : dataArray)
+            List<JsonObject> channels = new ArrayList<>();
+            for (JsonElement element : json.getAsJsonArray("data"))
             {
-                if (!element.isJsonObject())
+                if (element.isJsonObject())
                 {
-                    continue;
-                }
-
-                JsonObject channelObj = element.getAsJsonObject();
-                String slug = channelObj.has("slug") && !channelObj.get("slug").isJsonNull()
-                    ? channelObj.get("slug").getAsString() : "";
-                if (slug.isEmpty())
-                {
-                    continue;
-                }
-
-                boolean isLive = false;
-                String title = channelObj.has("stream_title") && !channelObj.get("stream_title").isJsonNull()
-                    ? channelObj.get("stream_title").getAsString() : "";
-                int viewerCount = 0;
-                String sessionId = "";
-
-                if (channelObj.has("livestream") && !channelObj.get("livestream").isJsonNull())
-                {
-                    JsonObject livestream = channelObj.getAsJsonObject("livestream");
-                    isLive = !livestream.has("is_live") || livestream.get("is_live").getAsBoolean();
-                    if (livestream.has("session_title") && !livestream.get("session_title").isJsonNull())
-                    {
-                        title = livestream.get("session_title").getAsString();
-                    }
-                    if (livestream.has("viewer_count") && !livestream.get("viewer_count").isJsonNull())
-                    {
-                        viewerCount = livestream.get("viewer_count").getAsInt();
-                    }
-                    if (livestream.has("id") && !livestream.get("id").isJsonNull())
-                    {
-                        sessionId = livestream.get("id").getAsString();
-                    }
-                    else if (livestream.has("created_at") && !livestream.get("created_at").isJsonNull())
-                    {
-                        sessionId = livestream.get("created_at").getAsString();
-                    }
-                }
-
-                String category = "";
-                if (channelObj.has("category") && !channelObj.get("category").isJsonNull() && channelObj.get("category").isJsonObject())
-                {
-                    JsonObject catObj = channelObj.getAsJsonObject("category");
-                    if (catObj.has("name") && !catObj.get("name").isJsonNull())
-                    {
-                        category = catObj.get("name").getAsString();
-                    }
-                }
-
-                streamMap.put(slug.toLowerCase(), new StreamInfo(
-                    Platform.KICK,
-                    slug,
-                    isLive,
-                    title,
-                    category,
-                    viewerCount,
-                    sessionId
-                ));
-            }
-
-            List<StreamInfo> results = new ArrayList<>();
-            for (String user : usernames)
-            {
-                String lower = user.trim().toLowerCase();
-                if (lower.isEmpty())
-                {
-                    continue;
-                }
-
-                StreamInfo stream = streamMap.get(lower);
-                if (stream != null)
-                {
-                    results.add(new StreamInfo(
-                        Platform.KICK,
-                        user.trim(),
-                        stream.isLive(),
-                        stream.getTitle(),
-                        stream.getCategory(),
-                        stream.getViewerCount(),
-                        stream.getSessionId()
-                    ));
-                }
-                else
-                {
-                    results.add(StreamInfo.offline(Platform.KICK, user.trim()));
+                    channels.add(element.getAsJsonObject());
                 }
             }
-
-            return results;
+            return channels;
         }
         catch (IOException | RuntimeException e)
         {
-            log.error("Failed to query Kick streams", e);
-            return Collections.emptyList();
+            log.error("Failed to query Kick channels", e);
+            return null;
         }
+    }
+
+    private StreamInfo parseChannel(String displayName, JsonObject channelObj)
+    {
+        String title = getString(channelObj, "stream_title");
+        String category = "";
+        boolean isLive = false;
+        int viewerCount = 0;
+        String sessionId = "";
+
+        if (channelObj.has("category") && channelObj.get("category").isJsonObject())
+        {
+            category = getString(channelObj.getAsJsonObject("category"), "name");
+        }
+
+        if (channelObj.has("stream") && channelObj.get("stream").isJsonObject())
+        {
+            JsonObject stream = channelObj.getAsJsonObject("stream");
+            isLive = stream.has("is_live") && !stream.get("is_live").isJsonNull() && stream.get("is_live").getAsBoolean();
+            if (stream.has("viewer_count") && !stream.get("viewer_count").isJsonNull())
+            {
+                viewerCount = stream.get("viewer_count").getAsInt();
+            }
+            sessionId = getString(stream, "start_time");
+        }
+
+        return new StreamInfo(Platform.KICK, displayName, isLive, title, category, viewerCount, sessionId);
+    }
+
+    private String getString(JsonObject obj, String key)
+    {
+        return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsString() : "";
+    }
+
+    private Long getLong(JsonObject obj, String key)
+    {
+        return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsLong() : null;
     }
 }
