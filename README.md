@@ -1,6 +1,6 @@
 # Live Right Now
 
-A RuneLite plugin that tracks specific Twitch and Kick streamers and delivers in-game banner popups, chat alerts, and desktop notifications when they go live.
+A RuneLite plugin that tracks selected Twitch and Kick streamers and alerts you in RuneScape when they go live.
 
 <p align="center">
   <img src="docs/images/scrying_pool.png" alt="Live Right Now" width="220" />
@@ -8,12 +8,11 @@ A RuneLite plugin that tracks specific Twitch and Kick streamers and delivers in
 
 ## Features
 
-- **Multi-Platform Support:** Track selected streamers on Twitch and Kick.
-- **Persistent Session Tracking:** Receive one alert per broadcast, including streams already live when first configured.
-- **In-Game Chat Alerts:** Plain-text game chat messages with no title clutter.
-- **Desktop Notifications:** Optional RuneLite desktop notifications.
-- **Twitch Connection:** Device authorization through Twitch's activation page.
-- **Public Kick Monitoring:** Kick channels are checked without requiring a Kick account connection.
+- **Twitch and Kick Support:** Monitor selected streamers on both platforms.
+- **One Alert Per Broadcast:** Get notified when a streamer goes live, including broadcasts already in progress when first configured.
+- **Persistent Alerts:** The plugin remembers broadcasts across RuneLite logins and restarts.
+- **Flexible Notifications:** Send alerts to RuneScape chat, your desktop, or both.
+- **Simple Twitch Setup:** Connect Twitch with a device code; Kick monitoring requires no account connection.
 
 > **Notification behavior:** The plugin alerts once for each live broadcast, including a broadcast already in progress when you first add or configure a streamer. It remembers the broadcast across RuneLite logins and restarts, so the same live stream will not alert repeatedly. A new alert is sent when the streamer starts a new broadcast. If several new broadcasts are detected together, they are combined into one notification.
 
