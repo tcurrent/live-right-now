@@ -24,4 +24,6 @@ A RuneLite plugin that tracks selected Twitch and Kick streamers and alerts you 
 
 ## How authorization works
 
-Clicking **Connect Twitch** or **Connect Kick** opens your browser to the [Live Right Now OAuth Proxy](https://github.com/tcurrent/live-right-now-oauth-proxy), which handles the Twitch/Kick authorization code exchange and hands the resulting access token back to a short-lived local listener on `localhost:4646`. The token never leaves your machine except to reach Twitch/Kick and the proxy directly, and each authorization attempt is tied to a single-use nonce so the local callback rejects any request that doesn't match it.
+Clicking **Connect Twitch** or **Connect Kick** opens your browser to the [Live Right Now OAuth Proxy](https://github.com/tcurrent/live-right-now-oauth-proxy). It performs the confidential authorization-code exchange without exposing a provider access token in the browser or callback URL. The plugin's listener binds only to `127.0.0.1:4646`, accepts a short-lived single-use handoff code tied to a random state value, then redeems it with a secret that never leaves RuneLite.
+
+See [privacy documentation](docs/privacy.md), [security documentation](docs/security.md), and the [Plugin Hub review notes](docs/plugin-hub-review.md).

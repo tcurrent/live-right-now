@@ -16,8 +16,11 @@ import com.tcurrent.liverightnow.LiveRightNowConfig;
 
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.util.LinkBrowser;
+import okhttp3.FormBody;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
@@ -26,6 +29,10 @@ public class TwitchOAuthManager
 {
     private static final Logger log = LoggerFactory.getLogger(TwitchOAuthManager.class);
     private static final String TWITCH_VALIDATE_URL = "https://id.twitch.tv/oauth2/validate";
+    private static final String TWITCH_REVOKE_URL = "https://id.twitch.tv/oauth2/revoke";
+    private static final String PROXY_URL = "https://tcurrent.github.io/live-right-now-oauth-proxy/";
+    private static final String HANDOFF_URL = "https://live-right-now-oauth-proxy.tcurrent.workers.dev/handoff";
+    private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
     private final LiveRightNowConfig config;
     private final ConfigManager configManager;
@@ -67,22 +74,29 @@ public class TwitchOAuthManager
     {
         disconnect();
         CompletableFuture<Boolean> resultFuture = new CompletableFuture<>();
+        OAuthFlow flow = OAuthFlow.create();
 
         try
         {
-            String nonce = loopbackServer.start((provider, token) -> {
+            loopbackServer.start("twitch", flow.getState(), (provider, handoffCode) -> {
                 if ("twitch".equalsIgnoreCase(provider))
                 {
-                    saveToken(token);
                     executorService.execute(() -> {
+                        String token = redeemHandoff(handoffCode, flow.getHandoffSecret());
+                        if (token == null)
+                        {
+                            resultFuture.complete(false);
+                            return;
+                        }
+                        saveToken(token);
                         fetchAndSaveTwitchUser(token);
                         resultFuture.complete(true);
                     });
                 }
             });
 
-            String proxyUrl = "https://tcurrent.github.io/live-right-now-oauth-proxy/?provider=twitch&port="
-                + OAuthLoopbackServer.PORT + "&nonce=" + nonce;
+            String proxyUrl = PROXY_URL + "?provider=twitch&state=" + flow.getState()
+                + "&handoff_proof=" + flow.getHandoffProof();
             LinkBrowser.browse(proxyUrl);
         }
         catch (IOException e)
@@ -96,8 +110,13 @@ public class TwitchOAuthManager
 
     public void disconnect()
     {
+        String token = config.twitchOAuthToken();
         configManager.unsetConfiguration(LiveRightNowConfig.GROUP, LiveRightNowConfig.TWITCH_OAUTH_TOKEN_KEY);
         configManager.unsetConfiguration(LiveRightNowConfig.GROUP, LiveRightNowConfig.TWITCH_CONNECTED_USER_KEY);
+        if (token != null && !token.trim().isEmpty())
+        {
+            executorService.execute(() -> revokeToken(token));
+        }
     }
 
     public void handleTokenExpired()
@@ -109,6 +128,50 @@ public class TwitchOAuthManager
     private void saveToken(String token)
     {
         configManager.setConfiguration(LiveRightNowConfig.GROUP, LiveRightNowConfig.TWITCH_OAUTH_TOKEN_KEY, token);
+    }
+
+    private String redeemHandoff(String handoffCode, String handoffSecret)
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("handoff_code", handoffCode);
+        payload.addProperty("handoff_secret", handoffSecret);
+        RequestBody body = RequestBody.create(JSON, payload.toString());
+        Request request = new Request.Builder().url(HANDOFF_URL).post(body).build();
+
+        try (Response response = okHttpClient.newCall(request).execute())
+        {
+            ResponseBody responseBody = response.body();
+            JsonObject json = responseBody == null ? null : gson.fromJson(responseBody.charStream(), JsonObject.class);
+            if (response.isSuccessful() && json != null && json.has("access_token"))
+            {
+                return json.get("access_token").getAsString();
+            }
+        }
+        catch (IOException | RuntimeException e)
+        {
+            log.warn("Failed to redeem Twitch OAuth handoff", e);
+        }
+        return null;
+    }
+
+    private void revokeToken(String token)
+    {
+        RequestBody body = new FormBody.Builder()
+            .add("client_id", config.twitchClientId().trim())
+            .add("token", token.trim())
+            .build();
+        Request request = new Request.Builder().url(TWITCH_REVOKE_URL).post(body).build();
+        try (Response response = okHttpClient.newCall(request).execute())
+        {
+            if (!response.isSuccessful())
+            {
+                log.warn("Twitch token revocation returned status {}", response.code());
+            }
+        }
+        catch (IOException | RuntimeException e)
+        {
+            log.warn("Failed to revoke Twitch token", e);
+        }
     }
 
     private void fetchAndSaveTwitchUser(String token)

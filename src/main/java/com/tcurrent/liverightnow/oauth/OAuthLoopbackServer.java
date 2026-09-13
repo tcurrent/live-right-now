@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.security.SecureRandom;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
@@ -27,12 +26,14 @@ public class OAuthLoopbackServer
     private static final Logger log = LoggerFactory.getLogger(OAuthLoopbackServer.class);
     public static final int PORT = 4646;
     private static final String CALLBACK_PATH = "/callback";
-    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+    private static final long FLOW_TIMEOUT_MINUTES = 5;
 
     private final ScheduledExecutorService executorService;
     private HttpServer server;
-    private BiConsumer<String, String> tokenCallback;
-    private String expectedNonce;
+    private BiConsumer<String, String> handoffCallback;
+    private String expectedProvider;
+    private String expectedState;
+        private boolean callbackConsumed;
 
     @Inject
     public OAuthLoopbackServer(ScheduledExecutorService executorService)
@@ -40,25 +41,21 @@ public class OAuthLoopbackServer
         this.executorService = executorService;
     }
 
-    /**
-     * Generates a fresh single-use nonce and (re)starts the loopback listener, tearing down
-     * any previous instance so a stale flow can never be mistaken for the new one.
-     */
-    public synchronized String start(BiConsumer<String, String> callback) throws IOException
+    public synchronized void start(String provider, String state, BiConsumer<String, String> callback) throws IOException
     {
         stop();
 
-        this.tokenCallback = callback;
-        byte[] nonceBytes = new byte[24];
-        SECURE_RANDOM.nextBytes(nonceBytes);
-        this.expectedNonce = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(nonceBytes);
+        this.handoffCallback = callback;
+        this.expectedProvider = provider;
+        this.expectedState = state;
+            this.callbackConsumed = false;
 
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", PORT), 0);
         server.createContext(CALLBACK_PATH, new CallbackHandler());
         server.setExecutor(executorService);
         server.start();
         log.debug("OAuth loopback server started on port {}", PORT);
-        return expectedNonce;
+        executorService.schedule(() -> stopIfState(state), FLOW_TIMEOUT_MINUTES, TimeUnit.MINUTES);
     }
 
     public synchronized void stop()
@@ -67,9 +64,19 @@ public class OAuthLoopbackServer
         {
             server.stop(0);
             server = null;
-            tokenCallback = null;
-            expectedNonce = null;
+            handoffCallback = null;
+            expectedProvider = null;
+            expectedState = null;
+                callbackConsumed = false;
             log.debug("OAuth loopback server stopped");
+        }
+    }
+
+    private synchronized void stopIfState(String state)
+    {
+        if (state.equals(expectedState))
+        {
+            stop();
         }
     }
 
@@ -82,24 +89,26 @@ public class OAuthLoopbackServer
             Map<String, String> params = parseQuery(query);
 
             String provider = params.get("provider");
-            String token = params.get("token");
-            String nonce = params.get("nonce");
-            String error = params.get("error");
+            String handoffCode = params.get("handoff_code");
+            String state = params.get("state");
 
             String responseHtml;
             int statusCode;
             boolean accepted = false;
+            BiConsumer<String, String> callback = null;
 
             synchronized (OAuthLoopbackServer.this)
             {
-                boolean nonceValid = expectedNonce != null && expectedNonce.equals(nonce);
+                boolean flowValid = expectedState != null && expectedState.equals(state)
+                    && expectedProvider != null && expectedProvider.equalsIgnoreCase(provider)
+                    && !callbackConsumed;
 
-                if (!nonceValid)
+                if (!flowValid)
                 {
                     responseHtml = errorPage("This authorization link is invalid or has expired. Please click Connect again in RuneLite.");
                     statusCode = 400;
                 }
-                else if (token != null && !token.trim().isEmpty() && provider != null)
+                else if (handoffCode != null && !handoffCode.trim().isEmpty())
                 {
                     String platformDisplay = "kick".equalsIgnoreCase(provider) ? "Kick" : "Twitch";
                     responseHtml = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Live Right Now - Connected</title>"
@@ -110,19 +119,17 @@ public class OAuthLoopbackServer
                         + "<p><strong>" + platformDisplay + "</strong> connected successfully!<br>You can safely close this window and return to RuneScape.</p></div></body></html>";
                     statusCode = 200;
                     accepted = true;
+                    callback = handoffCallback;
                 }
                 else
                 {
-                    String errorMsg = error != null ? error : "Authorization failed or token missing.";
-                    responseHtml = errorPage(errorMsg);
+                    responseHtml = errorPage("Authorization failed or the secure handoff code is missing.");
                     statusCode = 400;
                 }
 
                 if (accepted)
                 {
-                    // Single-use: invalidate the nonce immediately so a replayed or duplicated
-                    // request cannot be accepted twice.
-                    expectedNonce = null;
+                    callbackConsumed = true;
                 }
             }
 
@@ -134,12 +141,12 @@ public class OAuthLoopbackServer
                 os.write(bytes);
             }
 
-            if (accepted && tokenCallback != null && provider != null)
+            if (accepted && callback != null)
             {
-                tokenCallback.accept(provider.toLowerCase(), token);
+                callback.accept(provider.toLowerCase(), handoffCode);
             }
 
-            executorService.schedule(OAuthLoopbackServer.this::stop, 2, TimeUnit.SECONDS);
+            executorService.schedule(() -> stopIfState(state), 2, TimeUnit.SECONDS);
         }
     }
 
@@ -172,7 +179,7 @@ public class OAuthLoopbackServer
                     String value = java.net.URLDecoder.decode(pair[1], StandardCharsets.UTF_8.name());
                     map.put(key, value);
                 }
-                catch (Exception ignored)
+                catch (java.io.UnsupportedEncodingException | IllegalArgumentException ignored)
                 {
                 }
             }
