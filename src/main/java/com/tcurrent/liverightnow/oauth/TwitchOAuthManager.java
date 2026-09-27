@@ -40,6 +40,7 @@ public class TwitchOAuthManager
     private final Gson gson;
     private final ScheduledExecutorService executorService;
     private final OAuthLoopbackServer loopbackServer;
+    private volatile String lastKnownToken;
 
     @Inject
     public TwitchOAuthManager(
@@ -57,12 +58,18 @@ public class TwitchOAuthManager
         this.gson = gson;
         this.executorService = executorService;
         this.loopbackServer = loopbackServer;
+        this.lastKnownToken = config.twitchOAuthToken();
     }
 
     public boolean isConnected()
     {
         String token = config.twitchOAuthToken();
-        return token != null && !token.trim().isEmpty();
+        boolean connected = token != null && !token.trim().isEmpty();
+        if (connected)
+        {
+            lastKnownToken = token;
+        }
+        return connected;
     }
 
     public String getConnectedUser()
@@ -111,12 +118,25 @@ public class TwitchOAuthManager
     public void disconnect()
     {
         String token = config.twitchOAuthToken();
+        lastKnownToken = null;
         configManager.unsetConfiguration(LiveRightNowConfig.GROUP, LiveRightNowConfig.TWITCH_OAUTH_TOKEN_KEY);
         configManager.unsetConfiguration(LiveRightNowConfig.GROUP, LiveRightNowConfig.TWITCH_CONNECTED_USER_KEY);
         if (token != null && !token.trim().isEmpty())
         {
             executorService.execute(() -> revokeToken(token));
         }
+    }
+
+    public void handleConfigurationReset()
+    {
+        String token = lastKnownToken;
+        if (token == null || !config.twitchOAuthToken().trim().isEmpty())
+        {
+            return;
+        }
+
+        lastKnownToken = null;
+        executorService.execute(() -> revokeToken(token));
     }
 
     public void handleTokenExpired()
@@ -127,6 +147,7 @@ public class TwitchOAuthManager
 
     private void saveToken(String token)
     {
+        lastKnownToken = token;
         configManager.setConfiguration(LiveRightNowConfig.GROUP, LiveRightNowConfig.TWITCH_OAUTH_TOKEN_KEY, token);
     }
 

@@ -43,6 +43,7 @@ public class KickOAuthManager
     private final Gson gson;
     private final ScheduledExecutorService executorService;
     private final OAuthLoopbackServer loopbackServer;
+    private volatile String lastKnownToken;
 
     @Inject
     public KickOAuthManager(
@@ -60,12 +61,18 @@ public class KickOAuthManager
         this.gson = gson;
         this.executorService = executorService;
         this.loopbackServer = loopbackServer;
+        this.lastKnownToken = config.kickOAuthToken();
     }
 
     public boolean isConnected()
     {
         String token = config.kickOAuthToken();
-        return token != null && !token.trim().isEmpty();
+        boolean connected = token != null && !token.trim().isEmpty();
+        if (connected)
+        {
+            lastKnownToken = token;
+        }
+        return connected;
     }
 
     public String getConnectedUser()
@@ -114,12 +121,25 @@ public class KickOAuthManager
     public void disconnect()
     {
         String token = config.kickOAuthToken();
+        lastKnownToken = null;
         configManager.unsetConfiguration(LiveRightNowConfig.GROUP, LiveRightNowConfig.KICK_OAUTH_TOKEN_KEY);
         configManager.unsetConfiguration(LiveRightNowConfig.GROUP, LiveRightNowConfig.KICK_CONNECTED_USER_KEY);
         if (token != null && !token.trim().isEmpty())
         {
             executorService.execute(() -> revokeToken(token));
         }
+    }
+
+    public void handleConfigurationReset()
+    {
+        String token = lastKnownToken;
+        if (token == null || !config.kickOAuthToken().trim().isEmpty())
+        {
+            return;
+        }
+
+        lastKnownToken = null;
+        executorService.execute(() -> revokeToken(token));
     }
 
     public void handleTokenExpired()
@@ -130,6 +150,7 @@ public class KickOAuthManager
 
     private void saveToken(String token)
     {
+        lastKnownToken = token;
         configManager.setConfiguration(LiveRightNowConfig.GROUP, LiveRightNowConfig.KICK_OAUTH_TOKEN_KEY, token);
     }
 

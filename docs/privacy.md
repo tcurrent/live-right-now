@@ -6,4 +6,4 @@ The plugin communicates only with `id.twitch.tv`, `api.twitch.tv`, `id.kick.com`
 
 The OAuth Proxy performs a one-time authorization-code exchange and temporarily stores an encrypted handoff record for no more than five minutes. It does not log OAuth codes, access tokens, refresh tokens, or handoff secrets.
 
-Disconnecting removes local credentials immediately and attempts to revoke the provider access token. Users can also revoke access from their Twitch or Kick account settings.
+Disconnecting or resetting the plugin removes local credentials immediately and attempts to revoke the provider access token. Users can also revoke access from their Twitch or Kick account settings.

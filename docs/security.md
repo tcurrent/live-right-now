@@ -4,4 +4,6 @@ Each connection flow uses a cryptographically random state value and a locally g
 
 Provider access tokens are never sent in a URL. OAuth access tokens are stored only in RuneLite secret configuration and are not written to logs.
 
+Resetting the plugin configuration also attempts to revoke any previously cached Twitch or Kick access token before the local credential is discarded.
+
 [Open an issue](https://github.com/tcurrent/live-right-now/issues) to report any Security concerns.

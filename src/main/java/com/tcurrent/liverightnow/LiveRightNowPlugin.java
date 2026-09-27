@@ -182,6 +182,14 @@ public class LiveRightNowPlugin extends Plugin
             LiveRightNowConfig.KICK_OAUTH_TOKEN_KEY.equals(event.getKey()) ||
             LiveRightNowConfig.KICK_CONNECTED_USER_KEY.equals(event.getKey()))
         {
+            if (LiveRightNowConfig.TWITCH_OAUTH_TOKEN_KEY.equals(event.getKey()))
+            {
+                twitchOAuthManager.handleConfigurationReset();
+            }
+            else if (LiveRightNowConfig.KICK_OAUTH_TOKEN_KEY.equals(event.getKey()))
+            {
+                kickOAuthManager.handleConfigurationReset();
+            }
             panel.refreshAccountsUi();
             executorService.execute(this::checkStreams);
         }
