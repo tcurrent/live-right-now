@@ -2,6 +2,7 @@ package com.tcurrent.liverightnow.ui;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
@@ -20,8 +21,10 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
@@ -32,6 +35,7 @@ import com.tcurrent.liverightnow.model.StreamInfo;
 import com.tcurrent.liverightnow.oauth.KickOAuthManager;
 import com.tcurrent.liverightnow.oauth.TwitchOAuthManager;
 
+import net.runelite.client.config.ConfigManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.util.LinkBrowser;
@@ -48,6 +52,7 @@ public class LiveRightNowPanel extends PluginPanel
     private final TwitchOAuthManager twitchOAuthManager;
     private final KickOAuthManager kickOAuthManager;
     private final LiveRightNowConfig config;
+    private final ConfigManager configManager;
 
     private final JPanel contentPanel = new JPanel();
     private final JPanel accountsPanel = new JPanel();
@@ -57,13 +62,15 @@ public class LiveRightNowPanel extends PluginPanel
     public LiveRightNowPanel(
         TwitchOAuthManager twitchOAuthManager,
         KickOAuthManager kickOAuthManager,
-        LiveRightNowConfig config
+        LiveRightNowConfig config,
+        ConfigManager configManager
     )
     {
         super(false);
         this.twitchOAuthManager = twitchOAuthManager;
         this.kickOAuthManager = kickOAuthManager;
         this.config = config;
+        this.configManager = configManager;
 
         setLayout(new BorderLayout());
         setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -153,7 +160,12 @@ public class LiveRightNowPanel extends PluginPanel
                 TWITCH_PURPLE,
                 twitchOAuthManager.isConnected(),
                 twitchOAuthManager.getConnectedUser(),
-                () -> twitchOAuthManager.startConnectFlow().thenAccept(ok -> refreshAccountsUi()),
+                () -> {
+                    if (confirmOAuthConsent())
+                    {
+                        twitchOAuthManager.startConnectFlow().thenAccept(ok -> refreshAccountsUi());
+                    }
+                },
                 () -> {
                     twitchOAuthManager.disconnect();
                     refreshAccountsUi();
@@ -168,7 +180,12 @@ public class LiveRightNowPanel extends PluginPanel
                 KICK_GREEN,
                 kickOAuthManager.isConnected(),
                 kickOAuthManager.getConnectedUser(),
-                () -> kickOAuthManager.startConnectFlow().thenAccept(ok -> refreshAccountsUi()),
+                () -> {
+                    if (confirmOAuthConsent())
+                    {
+                        kickOAuthManager.startConnectFlow().thenAccept(ok -> refreshAccountsUi());
+                    }
+                },
                 () -> {
                     kickOAuthManager.disconnect();
                     refreshAccountsUi();
@@ -179,6 +196,118 @@ public class LiveRightNowPanel extends PluginPanel
             accountsPanel.revalidate();
             accountsPanel.repaint();
         });
+    }
+
+    private boolean confirmOAuthConsent()
+    {
+        if (config.oauthConsentAcknowledged())
+        {
+            return true;
+        }
+
+        JPanel sections = new JPanel();
+        sections.setOpaque(false);
+        sections.setLayout(new BoxLayout(sections, BoxLayout.Y_AXIS));
+        sections.add(buildConsentSection(
+            "Attention!",
+            "This will send data to third-party services not controlled or verified by RuneLite developers.",
+            true
+        ));
+        sections.add(Box.createVerticalStrut(10));
+        sections.add(buildConsentSection(
+            "What is sent?",
+            "To Twitch or Kick:\n"
+                + "- Your approval to connect this plugin to your account\n"
+                + "- The permissions needed to identify your account and check stream status\n\n"
+                + "To the Live Right Now connection service:\n"
+                + "- A one-time sign-in code used to finish the connection\n"
+                + "- Your IP address and normal browser connection details\n\n"
+                + "Stored on this computer:\n"
+                + "- Your connected username, tracked channels, and OAuth access token",
+            false
+        ));
+
+        JScrollPane scroll = new JScrollPane(sections);
+        scroll.setBorder(null);
+        scroll.getViewport().setOpaque(false);
+        scroll.setOpaque(false);
+        scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
+        scroll.setPreferredSize(new Dimension(500, 220));
+
+        int choice = JOptionPane.showConfirmDialog(
+            this,
+            scroll,
+            "Live Right Now OAuth",
+            JOptionPane.YES_NO_OPTION,
+            JOptionPane.WARNING_MESSAGE
+        );
+
+        if (choice == JOptionPane.YES_OPTION)
+        {
+            configManager.setConfiguration(
+                LiveRightNowConfig.GROUP,
+                LiveRightNowConfig.OAUTH_CONSENT_KEY,
+                true
+            );
+            return true;
+        }
+        return false;
+    }
+
+    private JPanel buildConsentSection(String title, String body, boolean includePrivacyLink)
+    {
+        JLabel header = new JLabel(title);
+        header.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
+        header.setForeground(ColorScheme.BRAND_ORANGE);
+        header.setAlignmentX(Component.LEFT_ALIGNMENT);
+        header.setBorder(new EmptyBorder(0, 0, 4, 0));
+
+        JTextArea text = new JTextArea(body);
+        text.setEditable(false);
+        text.setOpaque(false);
+        text.setFocusable(false);
+        text.setLineWrap(true);
+        text.setWrapStyleWord(true);
+        text.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
+        text.setForeground(Color.WHITE);
+        text.setBorder(null);
+        text.setMargin(new Insets(0, 0, 0, 0));
+        text.setPreferredSize(new Dimension(480, text.getPreferredSize().height));
+        text.setMaximumSize(new Dimension(Integer.MAX_VALUE, text.getPreferredSize().height));
+        text.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JPanel section = new JPanel();
+        section.setLayout(new BoxLayout(section, BoxLayout.Y_AXIS));
+        section.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        section.setAlignmentX(Component.LEFT_ALIGNMENT);
+        section.add(header);
+        section.add(text);
+
+        if (includePrivacyLink)
+        {
+            JLabel privacyLink = new JLabel("<html><u>Privacy policy</u></html>");
+            privacyLink.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
+            privacyLink.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+            privacyLink.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            privacyLink.setToolTipText("https://github.com/tcurrent/live-right-now/blob/main/docs/privacy.md");
+            privacyLink.addMouseListener(new MouseAdapter()
+            {
+                @Override
+                public void mouseClicked(MouseEvent e)
+                {
+                    if (SwingUtilities.isLeftMouseButton(e))
+                    {
+                        LinkBrowser.browse("https://github.com/tcurrent/live-right-now/blob/main/docs/privacy.md");
+                    }
+                }
+            });
+            privacyLink.setAlignmentX(Component.LEFT_ALIGNMENT);
+            section.add(Box.createVerticalStrut(8));
+            section.add(privacyLink);
+        }
+
+        return section;
     }
 
     public final void updateStreams(List<StreamInfo> streams)

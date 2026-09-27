@@ -21,6 +21,7 @@ public interface LiveRightNowConfig extends Config
     String KICK_CLIENT_ID_KEY = "kickClientId";
     String KICK_OAUTH_TOKEN_KEY = "kickOAuthToken";
     String KICK_CONNECTED_USER_KEY = "kickConnectedUser";
+    String OAUTH_CONSENT_KEY = "oauthConsentAcknowledged";
 
     String NOTIFIED_SESSIONS_KEY = "notifiedSessions";
 
@@ -140,6 +141,17 @@ public interface LiveRightNowConfig extends Config
     default String kickOAuthToken()
     {
         return "";
+    }
+
+    @ConfigItem(
+        keyName = OAUTH_CONSENT_KEY,
+        name = "OAuth consent acknowledged",
+        description = "Whether the external OAuth data warning has been acknowledged",
+        hidden = true
+    )
+    default boolean oauthConsentAcknowledged()
+    {
+        return false;
     }
 
     @ConfigSection(
