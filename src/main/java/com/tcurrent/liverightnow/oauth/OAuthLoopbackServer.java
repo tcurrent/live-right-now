@@ -238,8 +238,11 @@ public class OAuthLoopbackServer
 
     private String implicitCallbackPage()
     {
-        return "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Live Right Now - Twitch Authorization</title></head>"
-            + "<body><p id='status'>Completing Twitch authorization...</p><script>"
+        return "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Live Right Now - Twitch Authorization</title>"
+            + "<style>body{font-family:Segoe UI,Helvetica,Arial,sans-serif;background:#121212;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}"
+            + ".card{background:#1e1e1e;padding:30px 40px;border-radius:10px;border:1px solid #333;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.5);max-width:400px;}"
+            + "h2{color:#00B4D8;margin-top:0;}p{color:#aaa;line-height:1.5;}</style></head>"
+            + "<body><div class='card'><h2>Live Right Now</h2><p id='status'>Completing Twitch authorization...</p></div><script>"
             + "const fragment=new URLSearchParams(window.location.hash.slice(1));const query=new URLSearchParams(window.location.search);"
             + "const token=fragment.get('access_token')||'';const state=fragment.get('state')||query.get('state')||'';"
             + "const error=fragment.get('error')||query.get('error')||'';"
