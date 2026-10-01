@@ -33,7 +33,8 @@ public class OAuthLoopbackServer
     private BiConsumer<String, String> handoffCallback;
     private String expectedProvider;
     private String expectedState;
-        private boolean callbackConsumed;
+    private boolean callbackConsumed;
+    private boolean authorizationCodeCallback;
 
     @Inject
     public OAuthLoopbackServer(ScheduledExecutorService executorService)
@@ -43,14 +44,30 @@ public class OAuthLoopbackServer
 
     public synchronized void start(String provider, String state, BiConsumer<String, String> callback) throws IOException
     {
+        startInternal(provider, state, callback, false);
+    }
+
+    public synchronized void startTwitch(String state, BiConsumer<String, String> callback) throws IOException
+    {
+        startInternal("twitch", state, callback, true);
+    }
+
+    public synchronized void startKick(String state, BiConsumer<String, String> callback) throws IOException
+    {
+        startInternal("kick", state, callback, true);
+    }
+
+    private void startInternal(String provider, String state, BiConsumer<String, String> callback, boolean authorizationCodeCallback) throws IOException
+    {
         stop();
 
         this.handoffCallback = callback;
         this.expectedProvider = provider;
         this.expectedState = state;
-            this.callbackConsumed = false;
+        this.callbackConsumed = false;
+        this.authorizationCodeCallback = authorizationCodeCallback;
 
-        server = HttpServer.create(new InetSocketAddress("127.0.0.1", PORT), 0);
+        server = HttpServer.create(new InetSocketAddress("localhost", PORT), 0);
         server.createContext(CALLBACK_PATH, new CallbackHandler());
         server.setExecutor(executorService);
         server.start();
@@ -67,7 +84,8 @@ public class OAuthLoopbackServer
             handoffCallback = null;
             expectedProvider = null;
             expectedState = null;
-                callbackConsumed = false;
+            callbackConsumed = false;
+            authorizationCodeCallback = false;
             log.debug("OAuth loopback server stopped");
         }
     }
@@ -90,6 +108,7 @@ public class OAuthLoopbackServer
 
             String provider = params.get("provider");
             String handoffCode = params.get("handoff_code");
+            String authorizationCode = params.get("code");
             String state = params.get("state");
 
             String responseHtml;
@@ -99,6 +118,11 @@ public class OAuthLoopbackServer
 
             synchronized (OAuthLoopbackServer.this)
             {
+                if (provider == null && authorizationCodeCallback)
+                {
+                    provider = expectedProvider;
+                }
+
                 boolean flowValid = expectedState != null && expectedState.equals(state)
                     && expectedProvider != null && expectedProvider.equalsIgnoreCase(provider)
                     && !callbackConsumed;
@@ -108,15 +132,18 @@ public class OAuthLoopbackServer
                     responseHtml = errorPage("This authorization link is invalid or has expired. Please click Connect again in RuneLite.");
                     statusCode = 400;
                 }
-                else if (handoffCode != null && !handoffCode.trim().isEmpty())
+                else if (authorizationCodeCallback && authorizationCode != null && !authorizationCode.trim().isEmpty())
                 {
                     String platformDisplay = "kick".equalsIgnoreCase(provider) ? "Kick" : "Twitch";
-                    responseHtml = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Live Right Now - Connected</title>"
-                        + "<style>body{font-family:Segoe UI,Helvetica,Arial,sans-serif;background:#121212;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}"
-                        + ".card{background:#1e1e1e;padding:30px 40px;border-radius:10px;border:1px solid #333;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.5);max-width:400px;}"
-                        + "h2{color:#00B4D8;margin-top:0;}p{color:#aaa;line-height:1.5;}</style></head>"
-                        + "<body><div class='card'><h2>Live Right Now</h2>"
-                        + "<p><strong>" + platformDisplay + "</strong> connected successfully!<br>You can safely close this window and return to RuneScape.</p></div></body></html>";
+                    responseHtml = successPage(platformDisplay + " authorization received. You can safely close this window and return to RuneScape.");
+                    statusCode = 200;
+                    accepted = true;
+                    callback = handoffCallback;
+                }
+                else if (!authorizationCodeCallback && handoffCode != null && !handoffCode.trim().isEmpty())
+                {
+                    String platformDisplay = "kick".equalsIgnoreCase(provider) ? "Kick" : "Twitch";
+                    responseHtml = successPage(platformDisplay + " connected successfully! You can safely close this window and return to RuneScape.");
                     statusCode = 200;
                     accepted = true;
                     callback = handoffCallback;
@@ -143,11 +170,20 @@ public class OAuthLoopbackServer
 
             if (accepted && callback != null)
             {
-                callback.accept(provider.toLowerCase(), handoffCode);
+                callback.accept(provider.toLowerCase(), authorizationCodeCallback ? authorizationCode : handoffCode);
             }
 
             executorService.schedule(() -> stopIfState(state), 2, TimeUnit.SECONDS);
         }
+    }
+
+    private String successPage(String message)
+    {
+        return "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Live Right Now - Connected</title>"
+            + "<style>body{font-family:Segoe UI,Helvetica,Arial,sans-serif;background:#121212;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}"
+            + ".card{background:#1e1e1e;padding:30px 40px;border-radius:10px;border:1px solid #333;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.5);max-width:400px;}"
+            + "h2{color:#00B4D8;margin-top:0;}p{color:#aaa;line-height:1.5;}</style></head>"
+            + "<body><div class='card'><h2>Live Right Now</h2><p>" + message + "</p></div></body></html>";
     }
 
     private String errorPage(String message)

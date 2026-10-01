@@ -8,8 +8,8 @@
 | `api.twitch.tv` | Stream status lookup |
 | `id.kick.com` | Token revocation |
 | `api.kick.com` | Account and channel lookup |
-| Live Right Now OAuth Proxy | Confidential OAuth code exchange and handoff redemption |
-| `127.0.0.1:4646` | Temporary local OAuth callback |
+| Live Right Now OAuth Proxy | Confidential OAuth code exchange and handoff redemption for Twitch; authorization and handoff for Kick |
+| `localhost:4646` | Temporary local OAuth callback |
 
 ## OAuth permissions
 

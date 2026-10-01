@@ -33,7 +33,9 @@ public class KickOAuthManager
     private static final String KICK_USERS_URL = "https://api.kick.com/public/v1/users";
     private static final String KICK_CHANNELS_URL = "https://api.kick.com/public/v1/channels";
     private static final String KICK_REVOKE_URL = "https://id.kick.com/oauth/revoke";
-    private static final String PROXY_URL = "https://tcurrent.github.io/live-right-now-oauth-proxy/";
+    private static final String KICK_AUTHORIZE_URL = "https://id.kick.com/oauth/authorize";
+    private static final String KICK_REDIRECT_URI = "http://localhost:4646/callback";
+    private static final String EXCHANGE_URL = "https://live-right-now-oauth-proxy.tcurrent.workers.dev/exchange";
     private static final String HANDOFF_URL = "https://live-right-now-oauth-proxy.tcurrent.workers.dev/handoff";
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
@@ -88,11 +90,17 @@ public class KickOAuthManager
 
         try
         {
-            loopbackServer.start("kick", flow.getState(), (provider, handoffCode) -> {
+            loopbackServer.startKick(flow.getState(), (provider, authorizationCode) -> {
                 if ("kick".equalsIgnoreCase(provider))
                 {
                     executorService.execute(() -> {
-                        String token = redeemHandoff(handoffCode, flow.getHandoffSecret());
+                        String handoffCode = exchangeAuthorizationCode(
+                            authorizationCode,
+                            flow.getState(),
+                            flow.getHandoffProof(),
+                            flow.getCodeVerifier()
+                        );
+                        String token = handoffCode == null ? null : redeemHandoff(handoffCode, flow.getHandoffSecret());
                         if (token == null)
                         {
                             resultFuture.complete(false);
@@ -105,9 +113,16 @@ public class KickOAuthManager
                 }
             });
 
-            String proxyUrl = PROXY_URL + "?provider=kick&state=" + flow.getState()
-                + "&handoff_proof=" + flow.getHandoffProof();
-            LinkBrowser.browse(proxyUrl);
+            HttpUrl authorizeUrl = HttpUrl.parse(KICK_AUTHORIZE_URL).newBuilder()
+                .addQueryParameter("response_type", "code")
+                .addQueryParameter("client_id", config.kickClientId().trim())
+                .addQueryParameter("redirect_uri", KICK_REDIRECT_URI)
+                .addQueryParameter("scope", "user:read channel:read")
+                .addQueryParameter("code_challenge", flow.getCodeChallenge())
+                .addQueryParameter("code_challenge_method", "S256")
+                .addQueryParameter("state", flow.getState())
+                .build();
+            LinkBrowser.browse(authorizeUrl.toString());
         }
         catch (IOException e)
         {
@@ -174,6 +189,34 @@ public class KickOAuthManager
         catch (IOException | RuntimeException e)
         {
             log.warn("Failed to redeem Kick OAuth handoff", e);
+        }
+        return null;
+    }
+
+    private String exchangeAuthorizationCode(String authorizationCode, String state, String handoffProof, String codeVerifier)
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("provider", "kick");
+        payload.addProperty("code", authorizationCode);
+        payload.addProperty("state", state);
+        payload.addProperty("handoff_proof", handoffProof);
+        payload.addProperty("code_verifier", codeVerifier);
+        payload.addProperty("redirect_uri", KICK_REDIRECT_URI);
+        RequestBody body = RequestBody.create(JSON, payload.toString());
+        Request request = new Request.Builder().url(EXCHANGE_URL).post(body).build();
+
+        try (Response response = okHttpClient.newCall(request).execute())
+        {
+            ResponseBody responseBody = response.body();
+            JsonObject json = responseBody == null ? null : gson.fromJson(responseBody.charStream(), JsonObject.class);
+            if (response.isSuccessful() && json != null && json.has("handoff_code"))
+            {
+                return json.get("handoff_code").getAsString();
+            }
+        }
+        catch (IOException | RuntimeException e)
+        {
+            log.warn("Failed to exchange Kick authorization code", e);
         }
         return null;
     }

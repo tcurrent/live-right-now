@@ -12,19 +12,30 @@ final class OAuthFlow
     private final String state;
     private final String handoffSecret;
     private final String handoffProof;
+    private final String codeVerifier;
+    private final String codeChallenge;
 
-    private OAuthFlow(String state, String handoffSecret, String handoffProof)
+    private OAuthFlow(String state, String handoffSecret, String handoffProof, String codeVerifier, String codeChallenge)
     {
         this.state = state;
         this.handoffSecret = handoffSecret;
         this.handoffProof = handoffProof;
+        this.codeVerifier = codeVerifier;
+        this.codeChallenge = codeChallenge;
     }
 
     static OAuthFlow create()
     {
         String state = randomValue();
         String handoffSecret = randomValue();
-        return new OAuthFlow(state, handoffSecret, sha256Base64Url(handoffSecret));
+        String codeVerifier = randomValue();
+        return new OAuthFlow(
+            state,
+            handoffSecret,
+            sha256Base64Url(handoffSecret),
+            codeVerifier,
+            sha256Base64Url(codeVerifier)
+        );
     }
 
     String getState()
@@ -40,6 +51,16 @@ final class OAuthFlow
     String getHandoffProof()
     {
         return handoffProof;
+    }
+
+    String getCodeVerifier()
+    {
+        return codeVerifier;
+    }
+
+    String getCodeChallenge()
+    {
+        return codeChallenge;
     }
 
     private static String randomValue()
