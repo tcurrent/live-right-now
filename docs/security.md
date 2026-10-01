@@ -1,8 +1,8 @@
 # Security
 
-Each connection flow uses a cryptographically random state value and a locally generated handoff secret. Twitch and Kick redirect their authorization codes to the plugin's local callback at `http://localhost:4646/callback`. Kick also uses a locally generated PKCE verifier. The plugin validates the active flow and state, sends each authorization code to the proxy for exchange, and redeems a one-time handoff code with the original secret. The Twitch and Kick client secrets remain in the proxy.
+Each connection flow uses a cryptographically random state value. Twitch uses the implicit grant and returns its access token in the URL fragment. The localhost callback page removes the fragment and POSTs the token and state to the active local flow; the listener validates the state and accepts the token once. The token is not sent to the hosted proxy. Kick redirects its authorization code to the same local callback. RuneLite generates the PKCE verifier and sends the code and verifier to the proxy, which performs the token exchange using the Kick client secret and returns a one-time handoff code. The Kick client secret remains in the proxy.
 
-Provider access tokens are never sent in a URL. OAuth access tokens are stored only in RuneLite secret configuration and are not written to logs.
+Twitch's access token is briefly present in the browser URL fragment, which the callback page removes before forwarding it locally. Fragments are not included in the callback's HTTP request. OAuth access tokens are stored only in RuneLite secret configuration and are not written to logs.
 
 Resetting the plugin configuration also attempts to revoke any previously cached Twitch or Kick access token before the local credential is discarded.
 

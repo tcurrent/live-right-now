@@ -35,6 +35,7 @@ public class OAuthLoopbackServer
     private String expectedState;
     private boolean callbackConsumed;
     private boolean authorizationCodeCallback;
+    private boolean implicitTokenCallback;
 
     @Inject
     public OAuthLoopbackServer(ScheduledExecutorService executorService)
@@ -44,20 +45,20 @@ public class OAuthLoopbackServer
 
     public synchronized void start(String provider, String state, BiConsumer<String, String> callback) throws IOException
     {
-        startInternal(provider, state, callback, false);
+        startInternal(provider, state, callback, false, false);
     }
 
     public synchronized void startTwitch(String state, BiConsumer<String, String> callback) throws IOException
     {
-        startInternal("twitch", state, callback, true);
+        startInternal("twitch", state, callback, false, true);
     }
 
     public synchronized void startKick(String state, BiConsumer<String, String> callback) throws IOException
     {
-        startInternal("kick", state, callback, true);
+        startInternal("kick", state, callback, true, false);
     }
 
-    private void startInternal(String provider, String state, BiConsumer<String, String> callback, boolean authorizationCodeCallback) throws IOException
+    private void startInternal(String provider, String state, BiConsumer<String, String> callback, boolean authorizationCodeCallback, boolean implicitTokenCallback) throws IOException
     {
         stop();
 
@@ -66,6 +67,7 @@ public class OAuthLoopbackServer
         this.expectedState = state;
         this.callbackConsumed = false;
         this.authorizationCodeCallback = authorizationCodeCallback;
+        this.implicitTokenCallback = implicitTokenCallback;
 
         server = HttpServer.create(new InetSocketAddress("localhost", PORT), 0);
         server.createContext(CALLBACK_PATH, new CallbackHandler());
@@ -86,6 +88,7 @@ public class OAuthLoopbackServer
             expectedState = null;
             callbackConsumed = false;
             authorizationCodeCallback = false;
+            implicitTokenCallback = false;
             log.debug("OAuth loopback server stopped");
         }
     }
@@ -103,13 +106,34 @@ public class OAuthLoopbackServer
         @Override
         public void handle(HttpExchange exchange) throws IOException
         {
-            String query = exchange.getRequestURI().getQuery();
-            Map<String, String> params = parseQuery(query);
+            String requestPath = exchange.getRequestURI().getPath();
+            boolean implicitTokenPost = implicitTokenCallback
+                && "POST".equalsIgnoreCase(exchange.getRequestMethod())
+                && (CALLBACK_PATH + "/token").equals(requestPath);
+
+            if (implicitTokenCallback && "GET".equalsIgnoreCase(exchange.getRequestMethod())
+                && CALLBACK_PATH.equals(requestPath))
+            {
+                sendHtml(exchange, implicitCallbackPage(), 200);
+                return;
+            }
+
+            String requestData = implicitTokenPost
+                ? new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)
+                : exchange.getRequestURI().getQuery();
+            Map<String, String> params = parseQuery(requestData);
 
             String provider = params.get("provider");
             String handoffCode = params.get("handoff_code");
             String authorizationCode = params.get("code");
+            String accessToken = params.get("access_token");
             String state = params.get("state");
+            String oauthError = params.get("error");
+
+            if (implicitTokenPost)
+            {
+                provider = "twitch";
+            }
 
             String responseHtml;
             int statusCode;
@@ -125,12 +149,27 @@ public class OAuthLoopbackServer
 
                 boolean flowValid = expectedState != null && expectedState.equals(state)
                     && expectedProvider != null && expectedProvider.equalsIgnoreCase(provider)
-                    && !callbackConsumed;
+                    && !callbackConsumed
+                    && (!implicitTokenPost || "http://localhost:4646".equals(exchange.getRequestHeaders().getFirst("Origin")));
 
                 if (!flowValid)
                 {
                     responseHtml = errorPage("This authorization link is invalid or has expired. Please click Connect again in RuneLite.");
                     statusCode = 400;
+                }
+                else if (implicitTokenPost && oauthError != null && !oauthError.trim().isEmpty())
+                {
+                    responseHtml = errorPage("Twitch authorization was not completed. Please return to RuneLite and try again.");
+                    statusCode = 400;
+                    accepted = true;
+                    callback = handoffCallback;
+                }
+                else if (implicitTokenPost && accessToken != null && !accessToken.trim().isEmpty())
+                {
+                    responseHtml = successPage("Twitch authorization received. You can safely close this window and return to RuneLite.");
+                    statusCode = 200;
+                    accepted = true;
+                    callback = handoffCallback;
                 }
                 else if (authorizationCodeCallback && authorizationCode != null && !authorizationCode.trim().isEmpty())
                 {
@@ -162,6 +201,8 @@ public class OAuthLoopbackServer
 
             byte[] bytes = responseHtml.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+            exchange.getResponseHeaders().set("Cache-Control", "no-store");
+            exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
             exchange.sendResponseHeaders(statusCode, bytes.length);
             try (OutputStream os = exchange.getResponseBody())
             {
@@ -170,11 +211,45 @@ public class OAuthLoopbackServer
 
             if (accepted && callback != null)
             {
-                callback.accept(provider.toLowerCase(), authorizationCodeCallback ? authorizationCode : handoffCode);
+                String callbackValue = implicitTokenCallback
+                    ? (oauthError == null || oauthError.trim().isEmpty() ? accessToken : null)
+                    : (authorizationCodeCallback ? authorizationCode : handoffCode);
+                callback.accept(provider.toLowerCase(), callbackValue);
             }
 
             executorService.schedule(() -> stopIfState(state), 2, TimeUnit.SECONDS);
         }
+    }
+
+    private void sendHtml(HttpExchange exchange, String html, int statusCode) throws IOException
+    {
+        byte[] bytes = html.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+        exchange.getResponseHeaders().set("Cache-Control", "no-store");
+        exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
+        exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        exchange.getResponseHeaders().set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; connect-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'");
+        exchange.sendResponseHeaders(statusCode, bytes.length);
+        try (OutputStream output = exchange.getResponseBody())
+        {
+            output.write(bytes);
+        }
+    }
+
+    private String implicitCallbackPage()
+    {
+        return "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Live Right Now - Twitch Authorization</title></head>"
+            + "<body><p id='status'>Completing Twitch authorization...</p><script>"
+            + "const fragment=new URLSearchParams(window.location.hash.slice(1));const query=new URLSearchParams(window.location.search);"
+            + "const token=fragment.get('access_token')||'';const state=fragment.get('state')||query.get('state')||'';"
+            + "const error=fragment.get('error')||query.get('error')||'';"
+            + "history.replaceState(null,'',window.location.pathname);"
+            + "if(!state||(!token&&!error)){document.getElementById('status').textContent='Authorization response was incomplete. Return to RuneLite and try again.';}"
+            + "else{fetch('/callback/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},"
+            + "body:new URLSearchParams({state:state,access_token:token,error:error}),cache:'no-store'})"
+            + ".then(response=>{if(!response.ok)throw new Error();document.getElementById('status').textContent='Twitch authorization received. You can safely close this window and return to RuneLite.';})"
+            + ".catch(()=>{document.getElementById('status').textContent='Authorization could not be completed. Return to RuneLite and try again.';});}"
+            + "</script></body></html>";
     }
 
     private String successPage(String message)
