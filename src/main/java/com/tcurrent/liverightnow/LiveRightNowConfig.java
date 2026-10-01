@@ -46,7 +46,7 @@ public interface LiveRightNowConfig extends Config
     @ConfigItem(
         keyName = TWITCH_STREAMERS_KEY,
         name = "Tracked Streamers",
-        description = "Comma-separated list of Twitch usernames to track (e.g. b0aty, faux, torvesta)",
+        description = "Comma-separated list of Twitch usernames to track (e.g. Dino_xx, Sick_Nerd, Widega_)",
         position = 2,
         section = TWITCH_SECTION
     )
@@ -111,7 +111,7 @@ public interface LiveRightNowConfig extends Config
     @ConfigItem(
         keyName = KICK_STREAMERS_KEY,
         name = "Tracked Streamers",
-        description = "Comma-separated list of Kick usernames to track (e.g. odablock, adinross)",
+        description = "Comma-separated list of Kick usernames to track (e.g. Odablock, Greg, PureSpam)",
         position = 12,
         section = KICK_SECTION
     )
