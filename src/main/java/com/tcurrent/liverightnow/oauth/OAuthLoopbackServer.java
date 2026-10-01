@@ -135,7 +135,7 @@ public class OAuthLoopbackServer
                 else if (authorizationCodeCallback && authorizationCode != null && !authorizationCode.trim().isEmpty())
                 {
                     String platformDisplay = "kick".equalsIgnoreCase(provider) ? "Kick" : "Twitch";
-                    responseHtml = successPage(platformDisplay + " authorization received. You can safely close this window and return to RuneScape.");
+                    responseHtml = successPage(platformDisplay + " authorization received. You can safely close this window and return to RuneLite.");
                     statusCode = 200;
                     accepted = true;
                     callback = handoffCallback;
@@ -143,7 +143,7 @@ public class OAuthLoopbackServer
                 else if (!authorizationCodeCallback && handoffCode != null && !handoffCode.trim().isEmpty())
                 {
                     String platformDisplay = "kick".equalsIgnoreCase(provider) ? "Kick" : "Twitch";
-                    responseHtml = successPage(platformDisplay + " connected successfully! You can safely close this window and return to RuneScape.");
+                    responseHtml = successPage(platformDisplay + " connected successfully! You can safely close this window and return to RuneLite.");
                     statusCode = 200;
                     accepted = true;
                     callback = handoffCallback;
