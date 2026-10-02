@@ -20,6 +20,7 @@ public interface LiveRightNowConfig extends Config
     String KICK_STREAMERS_KEY = "kickStreamers";
     String KICK_CLIENT_ID_KEY = "kickClientId";
     String KICK_OAUTH_TOKEN_KEY = "kickOAuthToken";
+    String KICK_REFRESH_TOKEN_KEY = "kickRefreshToken";
     String KICK_CONNECTED_USER_KEY = "kickConnectedUser";
     String OAUTH_CONSENT_KEY = "oauthConsentAcknowledged";
 
@@ -139,6 +140,18 @@ public interface LiveRightNowConfig extends Config
         secret = true
     )
     default String kickOAuthToken()
+    {
+        return "";
+    }
+
+    @ConfigItem(
+        keyName = KICK_REFRESH_TOKEN_KEY,
+        name = "Kick Refresh Token",
+        description = "Kick OAuth Refresh Token",
+        hidden = true,
+        secret = true
+    )
+    default String kickRefreshToken()
     {
         return "";
     }

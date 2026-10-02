@@ -37,6 +37,7 @@ public class KickOAuthManager
     private static final String KICK_REDIRECT_URI = "http://localhost:4646/callback";
     private static final String EXCHANGE_URL = "https://live-right-now-oauth-proxy.tcurrent.workers.dev/exchange";
     private static final String HANDOFF_URL = "https://live-right-now-oauth-proxy.tcurrent.workers.dev/handoff";
+    private static final String REFRESH_URL = "https://live-right-now-oauth-proxy.tcurrent.workers.dev/refresh";
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
     private final LiveRightNowConfig config;
@@ -46,6 +47,7 @@ public class KickOAuthManager
     private final ScheduledExecutorService executorService;
     private final OAuthLoopbackServer loopbackServer;
     private volatile String lastKnownToken;
+    private volatile String lastKnownRefreshToken;
 
     @Inject
     public KickOAuthManager(
@@ -64,6 +66,7 @@ public class KickOAuthManager
         this.executorService = executorService;
         this.loopbackServer = loopbackServer;
         this.lastKnownToken = config.kickOAuthToken();
+        this.lastKnownRefreshToken = config.kickRefreshToken();
     }
 
     public boolean isConnected()
@@ -100,13 +103,14 @@ public class KickOAuthManager
                             flow.getHandoffProof(),
                             flow.getCodeVerifier()
                         );
-                        String token = handoffCode == null ? null : redeemHandoff(handoffCode, flow.getHandoffSecret());
-                        if (token == null)
+                        JsonObject tokens = handoffCode == null ? null : redeemHandoff(handoffCode, flow.getHandoffSecret());
+                        if (tokens == null)
                         {
                             resultFuture.complete(false);
                             return;
                         }
-                        saveToken(token);
+                        String token = tokens.get("access_token").getAsString();
+                        saveTokens(token, tokens);
                         fetchAndSaveKickUser(token);
                         resultFuture.complete(true);
                     });
@@ -136,25 +140,39 @@ public class KickOAuthManager
     public void disconnect()
     {
         String token = config.kickOAuthToken();
+        String refreshToken = config.kickRefreshToken();
         lastKnownToken = null;
+        lastKnownRefreshToken = null;
+        configManager.unsetConfiguration(LiveRightNowConfig.GROUP, LiveRightNowConfig.KICK_REFRESH_TOKEN_KEY);
         configManager.unsetConfiguration(LiveRightNowConfig.GROUP, LiveRightNowConfig.KICK_OAUTH_TOKEN_KEY);
         configManager.unsetConfiguration(LiveRightNowConfig.GROUP, LiveRightNowConfig.KICK_CONNECTED_USER_KEY);
-        if (token != null && !token.trim().isEmpty())
-        {
-            executorService.execute(() -> revokeToken(token));
-        }
+        revokeTokens(token, refreshToken);
     }
 
     public void handleConfigurationReset()
     {
         String token = lastKnownToken;
+        String refreshToken = lastKnownRefreshToken;
         if (token == null || !config.kickOAuthToken().trim().isEmpty())
         {
             return;
         }
 
         lastKnownToken = null;
-        executorService.execute(() -> revokeToken(token));
+        lastKnownRefreshToken = null;
+        revokeTokens(token, refreshToken);
+    }
+
+    private void revokeTokens(String token, String refreshToken)
+    {
+        if (token != null && !token.trim().isEmpty())
+        {
+            executorService.execute(() -> revokeToken(token, "access_token"));
+        }
+        if (refreshToken != null && !refreshToken.trim().isEmpty())
+        {
+            executorService.execute(() -> revokeToken(refreshToken, "refresh_token"));
+        }
     }
 
     public void handleTokenExpired()
@@ -163,13 +181,73 @@ public class KickOAuthManager
         disconnect();
     }
 
-    private void saveToken(String token)
+    /**
+     * Returns the new access token, or null on failure. Disconnects only if Kick rejected the refresh token.
+     */
+    public synchronized String refreshAccessToken(String failedToken)
+    {
+        String current = config.kickOAuthToken();
+        if (current != null && !current.trim().isEmpty() && !current.trim().equals(failedToken))
+        {
+            return current.trim();
+        }
+
+        String refreshToken = config.kickRefreshToken();
+        if (refreshToken == null || refreshToken.trim().isEmpty())
+        {
+            handleTokenExpired();
+            return null;
+        }
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("provider", "kick");
+        payload.addProperty("refresh_token", refreshToken.trim());
+        RequestBody body = RequestBody.create(JSON, payload.toString());
+        Request request = new Request.Builder().url(REFRESH_URL).post(body).build();
+
+        try (Response response = okHttpClient.newCall(request).execute())
+        {
+            ResponseBody responseBody = response.body();
+            JsonObject json = responseBody == null ? null : gson.fromJson(responseBody.charStream(), JsonObject.class);
+            if (response.isSuccessful() && json != null && json.has("access_token"))
+            {
+                String token = json.get("access_token").getAsString();
+                saveTokens(token, json);
+                return token;
+            }
+            if (response.code() >= 400 && response.code() < 500)
+            {
+                handleTokenExpired();
+            }
+            else
+            {
+                log.warn("Kick token refresh failed with status {}", response.code());
+            }
+        }
+        catch (IOException | RuntimeException e)
+        {
+            log.warn("Failed to refresh Kick token", e);
+        }
+        return null;
+    }
+
+    private void saveTokens(String token, JsonObject json)
     {
         lastKnownToken = token;
+        if (json.has("refresh_token") && !json.get("refresh_token").isJsonNull())
+        {
+            String refreshToken = json.get("refresh_token").getAsString();
+            lastKnownRefreshToken = refreshToken;
+            configManager.setConfiguration(
+                LiveRightNowConfig.GROUP,
+                LiveRightNowConfig.KICK_REFRESH_TOKEN_KEY,
+                refreshToken
+            );
+        }
         configManager.setConfiguration(LiveRightNowConfig.GROUP, LiveRightNowConfig.KICK_OAUTH_TOKEN_KEY, token);
     }
 
-    private String redeemHandoff(String handoffCode, String handoffSecret)
+    private JsonObject redeemHandoff(String handoffCode, String handoffSecret)
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("handoff_code", handoffCode);
@@ -183,7 +261,7 @@ public class KickOAuthManager
             JsonObject json = responseBody == null ? null : gson.fromJson(responseBody.charStream(), JsonObject.class);
             if (response.isSuccessful() && json != null && json.has("access_token"))
             {
-                return json.get("access_token").getAsString();
+                return json;
             }
         }
         catch (IOException | RuntimeException e)
@@ -221,7 +299,7 @@ public class KickOAuthManager
         return null;
     }
 
-    private void revokeToken(String token)
+    private void revokeToken(String token, String tokenType)
     {
         HttpUrl baseUrl = HttpUrl.parse(KICK_REVOKE_URL);
         if (baseUrl == null)
@@ -230,7 +308,7 @@ public class KickOAuthManager
         }
         HttpUrl revokeUrl = baseUrl.newBuilder()
             .addQueryParameter("token", token.trim())
-            .addQueryParameter("token_hint_type", "access_token")
+            .addQueryParameter("token_hint_type", tokenType)
             .build();
         RequestBody body = RequestBody.create(null, new byte[0]);
         Request request = new Request.Builder().url(revokeUrl).post(body).build();

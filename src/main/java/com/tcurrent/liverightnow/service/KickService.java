@@ -68,16 +68,10 @@ public class KickService
             return Collections.emptyList();
         }
 
-        String token = config.kickOAuthToken() != null ? config.kickOAuthToken().trim() : "";
-        if (token.isEmpty())
+        if (currentToken().isEmpty())
         {
             log.warn("Kick OAuth Token is not configured. Skipping Kick lookup.");
             return Collections.emptyList();
-        }
-
-        if (token.toLowerCase().startsWith("bearer "))
-        {
-            token = token.substring(7).trim();
         }
 
         List<String> normalizedUsers = new ArrayList<>();
@@ -114,7 +108,7 @@ public class KickService
         Map<String, JsonObject> channelsByUsername = new HashMap<>();
         if (!unresolved.isEmpty())
         {
-            List<JsonObject> channels = requestChannels("slug", unresolved, token);
+            List<JsonObject> channels = requestChannels("slug", unresolved);
             if (channels == null)
             {
                 return Collections.emptyList();
@@ -142,7 +136,7 @@ public class KickService
             {
                 idStrings.add(String.valueOf(id));
             }
-            List<JsonObject> channels = requestChannels("broadcaster_user_id", idStrings, token);
+            List<JsonObject> channels = requestChannels("broadcaster_user_id", idStrings);
             if (channels == null)
             {
                 return Collections.emptyList();
@@ -178,7 +172,18 @@ public class KickService
     /**
      * Returns null on a request failure (401/unsuccessful/IO error) so callers can bail out entirely.
      */
-    private List<JsonObject> requestChannels(String paramName, List<String> values, String token)
+    private List<JsonObject> requestChannels(String paramName, List<String> values)
+    {
+        return requestChannels(paramName, values, currentToken(), true);
+    }
+
+    private String currentToken()
+    {
+        String token = config.kickOAuthToken() != null ? config.kickOAuthToken().trim() : "";
+        return token.toLowerCase().startsWith("bearer ") ? token.substring(7).trim() : token;
+    }
+
+    private List<JsonObject> requestChannels(String paramName, List<String> values, String token, boolean canRefresh)
     {
         HttpUrl baseUrl = HttpUrl.parse(KICK_CHANNELS_API_URL);
         if (baseUrl == null)
@@ -204,8 +209,15 @@ public class KickService
             if (response.code() == 401)
             {
                 log.warn("Kick API returned 401 Unauthorized (OAuth token expired).");
-                kickOAuthManager.handleTokenExpired();
-                notificationManager.notifySessionExpired(Platform.KICK);
+                String refreshed = canRefresh ? kickOAuthManager.refreshAccessToken(token) : null;
+                if (refreshed != null)
+                {
+                    return requestChannels(paramName, values, refreshed, false);
+                }
+                if (!kickOAuthManager.isConnected())
+                {
+                    notificationManager.notifySessionExpired(Platform.KICK);
+                }
                 return null;
             }
 
