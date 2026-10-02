@@ -321,7 +321,8 @@ public class LiveRightNowPanel extends PluginPanel
                 JPanel warningRow = new JPanel(new BorderLayout());
                 warningRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
                 warningRow.setAlignmentX(LEFT_ALIGNMENT);
-                JLabel warningLabel = new JLabel("<html><body style='color:#aaa;width:180px;'>Connect an account above to start receiving alerts.</body></html>");
+                JLabel warningLabel = new JLabel("<html><body style='width:180px;'>Connect an account above to start receiving alerts.</body></html>");
+                warningLabel.setForeground(new Color(170, 170, 170));
                 warningLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
                 warningLabel.setHorizontalAlignment(SwingConstants.LEFT);
                 warningRow.setBorder(new EmptyBorder(10, 5, 10, 5));
@@ -333,7 +334,8 @@ public class LiveRightNowPanel extends PluginPanel
                 JPanel emptyRow = new JPanel(new BorderLayout());
                 emptyRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
                 emptyRow.setAlignmentX(LEFT_ALIGNMENT);
-                JLabel emptyLabel = new JLabel("<html><body style='color:#888;'>No tracked streamers online right now.</body></html>");
+                JLabel emptyLabel = new JLabel("No tracked streamers online right now.");
+                emptyLabel.setForeground(new Color(136, 136, 136));
                 emptyLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
                 emptyLabel.setHorizontalAlignment(SwingConstants.LEFT);
                 emptyRow.setBorder(new EmptyBorder(10, 5, 10, 5));
